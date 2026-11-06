@@ -104,3 +104,24 @@ dk_get() { # <path?query>
 dk_post() { # <path> <json-body>
   curl -sf -m 600 -X POST -H "x-api-key: $(dokploy_token)" -H 'Content-Type: application/json' -d "$2" "$DOKPLOY_URL/api/$1"
 }
+
+# --- phone-status helpers ---
+
+parse_version_name() { # <dumpsys-package-text> → versionName or empty
+  printf '%s\n' "$1" | grep -oE 'versionName=[^ ]+' | head -1 | cut -d= -f2
+}
+
+version_matches_pin() { # <installed-versionName> <pinned-version, optional leading v> → yes|no
+  [ "${1%%-*}" = "${2#v}" ] && echo yes || echo no
+}
+
+node_state() { # <tailscale-status-json> <hostname> → online|offline|none
+  python3 -I - "$1" "$2" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1])); want = sys.argv[2]
+for p in list(s.get("Peer", {}).values()) + [s.get("Self", {})]:
+    if p.get("DNSName", "").split(".")[0] == want or p.get("HostName") == want:
+        print("online" if p.get("Online") else "offline"); sys.exit(0)
+print("none")
+PY
+}

@@ -33,3 +33,11 @@ assert_fails "node ip unknown hostname exits 1" node_ip_by_hostname tests/fixtur
 
 assert_eq "3RzoxeV75giJGcgX3ueCM" "$(find_server_id tests/fixtures/dokploy-servers.json pixel-7-podroid)" "find_server_id existing"
 assert_eq "" "$(find_server_id tests/fixtures/dokploy-servers.json nope)" "find_server_id unknown is empty"
+
+# --- Task 4: phone-status helpers ---
+assert_eq "1.2.9" "$(parse_version_name "$(cat tests/fixtures/pm-dump.txt)")" "parse_version_name"
+assert_eq "yes" "$(version_matches_pin 1.2.9 v1.2.9)" "version matches pin with v prefix"
+assert_eq "no" "$(version_matches_pin 1.2.8 v1.2.9)" "version behind pin"
+assert_eq "online" "$(node_state tests/fixtures/ts-status.json pixel-7-podroid)" "node_state online"
+assert_eq "none" "$(node_state tests/fixtures/ts-status.json no-such)" "node_state none"
+assert_eq "yes" "$(version_matches_pin 1.104.5-t788384763-gd8673104f 1.104.5)" "version matches pin ignoring build suffix"
