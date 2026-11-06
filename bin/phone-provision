@@ -120,7 +120,6 @@ command_background=yes
 pidfile="/run/tailnet-keepalive.pid"
 depend() { need tailscale; }
 RC
-sed -i "s/\$DOKPLOY_BOX_IP/$DOKPLOY_BOX_IP/" /etc/init.d/tailnet-keepalive
 chmod +x /etc/init.d/tailnet-keepalive; rc-update -q add tailnet-keepalive default; rc-service -q tailnet-keepalive restart >/dev/null 2>&1 || rc-service -q tailnet-keepalive start >/dev/null 2>&1
 $FORWARDS
 echo "   guest configured (\$(tailscale version | head -1), sshd on $GUEST_SSH_PORT, \$(/usr/local/bin/podroid-forward list | wc -l) forwards)"
