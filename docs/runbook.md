@@ -194,3 +194,11 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
   needs the Tailscale Android app logged in on the phone (not done on either phone yet).
 - Tailscale SSH: skipped; OpenSSH with keys over the tailnet already covers it and the policy
   allows non-root users only.
+
+## Screen off and Doze (tested 2026-11-06)
+
+With Podroid on the deviceidle whitelist plus `RUN_ANY_IN_BACKGROUND`/`RUN_IN_BACKGROUND` allowed,
+standby bucket `active`, and app hibernation off, a forced deep Doze (`dumpsys deviceidle force-idle`)
+on the Pixel 7 left the guest reachable over the tailnet, Dokploy validate green, and ssh working for
+the whole 4-minute test. Default is now screen off after 60 s (`svc power stayon false`). When driving
+the UI over adb, wake it first with `input keyevent KEYCODE_WAKEUP`. The provisioner applies all of it.

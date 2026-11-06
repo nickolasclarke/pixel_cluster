@@ -46,8 +46,16 @@ adb -s "$ADB_TARGET" shell device_config put activity_manager max_phantom_proces
 adb -s "$ADB_TARGET" shell settings put global settings_enable_monitor_phantom_procs false
 for p in POST_NOTIFICATIONS MANAGE_VIRTUAL_MACHINE USE_CUSTOM_VIRTUAL_MACHINE; do adb -s "$ADB_TARGET" shell pm grant "$PODROID_PKG" "android.permission.$p" 2>>"$LOG_FILE" || true; done
 adb -s "$ADB_TARGET" shell dumpsys deviceidle whitelist "+$PODROID_PKG" >>"$LOG_FILE"
-adb -s "$ADB_TARGET" shell svc power stayon true
-adb -s "$ADB_TARGET" shell settings put system screen_off_timeout 2147483647
+# background survival beyond the deviceidle whitelist: run-in-background app ops, active standby
+# bucket, no app hibernation / permission auto-revoke. Verified under forced deep Doze (runbook).
+adb -s "$ADB_TARGET" shell appops set "$PODROID_PKG" RUN_ANY_IN_BACKGROUND allow
+adb -s "$ADB_TARGET" shell appops set "$PODROID_PKG" RUN_IN_BACKGROUND allow
+adb -s "$ADB_TARGET" shell am set-standby-bucket "$PODROID_PKG" active
+adb -s "$ADB_TARGET" shell cmd app_hibernation set-state --user 0 "$PODROID_PKG" false >>"$LOG_FILE" 2>&1 || true
+adb -s "$ADB_TARGET" shell appops set "$PODROID_PKG" AUTO_REVOKE_PERMISSIONS_IF_UNUSED ignore >>"$LOG_FILE" 2>&1 || true
+# screen off by default (wake with `adb shell input keyevent KEYCODE_WAKEUP` when driving the UI)
+adb -s "$ADB_TARGET" shell svc power stayon false
+adb -s "$ADB_TARGET" shell settings put system screen_off_timeout 60000
 adb -s "$ADB_TARGET" shell settings put system screen_brightness_mode 0
 adb -s "$ADB_TARGET" shell settings put system screen_brightness 1
 if [ "$(adb -s "$ADB_TARGET" shell locksettings get-disabled | tr -d '\r')" != "true" ]; then
@@ -58,7 +66,7 @@ fi
 # charge to 80 % only: the phone lives on power (Battery > Battery health > Charging optimization)
 adb -s "$ADB_TARGET" shell settings put secure charge_optimization_mode 1
 adb -s "$ADB_TARGET" shell settings put secure adaptive_charging_enabled 0
-echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel, charge limit 80%"
+echo "   phantom-process fix, Podroid permissions and background ops, screen off after 60 s, charge limit 80%"
 DEBLOAT_OUT=$(bin/phone-debloat "$ADB_TARGET") || die "phone-debloat failed (see $LOG_FILE)"
 echo "   debloat: ${DEBLOAT_OUT%%$'\n'*}"
 
