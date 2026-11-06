@@ -11,13 +11,15 @@ source bin/lib.sh
 TS_JSON=$(mktemp); SERVERS=$(mktemp); trap 'rm -f "$TS_JSON" "$SERVERS"' EXIT
 tailscale status --json > "$TS_JSON" 2>/dev/null || echo '{}' > "$TS_JSON"
 dk_get server.all > "$SERVERS" 2>/dev/null || echo '[]' > "$SERVERS"
-rc=0
-for serial in $(adb devices | awk 'NR>1 && $2=="device" {print $1}'); do
-  model=$(adb -s "$serial" shell getprop ro.product.model | tr -d '\r')
+rc=0; SEEN=""
+for target in $(adb devices | awk 'NR>1 && $2=="device" {print $1}'); do
+  serial=$(adb_real_serial "$target"); [ -n "$serial" ] || continue
+  case " $SEEN " in *" $serial "*) continue ;; esac; SEEN="$SEEN $serial"   # one line per phone even if on USB and Wi-Fi
+  model=$(adb -s "$target" shell getprop ro.product.model | tr -d '\r')
   name=$(phone_node_name "$model" "$serial" pins/phones)
-  line="$serial $model"
+  line="$serial $model via:$target"
   while read -r app pkg <&3; do
-    inst=$(parse_version_name "$(adb -s "$serial" shell dumpsys package "$pkg" 2>/dev/null)")
+    inst=$(parse_version_name "$(adb -s "$target" shell dumpsys package "$pkg" 2>/dev/null)")
     pin=$(cat "pins/$app.version" 2>/dev/null || echo '?')
     line="$line $app:${inst:-none}/$pin"
     [ "$(version_matches_pin "${inst:-none}" "$pin")" = yes ] || rc=1

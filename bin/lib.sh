@@ -144,3 +144,8 @@ packages_to_disable() { # <pm-list-packages-e output file> <disable-list file> â
   sed 's/^package://' "$1" | sort -u | comm -12 - "${TMPDIR:-/tmp}/.want.$$"
   rm -f "${TMPDIR:-/tmp}/.want.$$"
 }
+
+# --- adb over the network: scripts take a USB serial or host:port; names and pins key on the real serial
+adb_real_serial() { # <adb -s target> â†’ ro.serialno
+  adb -s "$1" shell getprop ro.serialno 2>/dev/null | tr -d '\r'
+}
