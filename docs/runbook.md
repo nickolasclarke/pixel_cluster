@@ -112,3 +112,30 @@ and at `http://<phone LAN IP>:30000/` through the Podroid forward.
 - Direct-path test on the China-direct Wi-Fi.
 - The Android-app node (`pixel-7`, 100.64.0.8) and the guest node (`pixel-7-podroid`, 100.64.0.9)
   are two headscale nodes per phone; fine, but `phone-status` should show both.
+
+## Second phone: Pixel 6 Pro (`1B231FDEE0033H`, Android 17), 2026-11-06
+
+`bin/phone-provision` did everything except the wizard. Node `pixel-6-pro-podroid` (100.64.0.10),
+Dokploy server `pixel-6-pro-podroid`, nginx smoke test at `http://100.64.0.10:30000/`. Learned:
+
+- **Two attached phones collide on host port 9922.** The script now lets adb allocate a host port per
+  phone (`adb forward tcp:0 tcp:9922`) and removes it on exit.
+- **If the VM was started before the wizard finished** (the script's first pass sends START_VM), the
+  app never opens its 9922 listener even though dropbear runs in the guest and the SSH toggle looks
+  on. The STOP_VM broadcast did not stop it; the app's **Restart** button did, and 9922 appeared 10 s
+  later. The wizard's "load balance off" has to be done before the VM starts, or the sizes stick at
+  the auto values until a restart.
+- **The headscale REST preauth path works** (`POST /api/v1/preauthkey`, `"user":"1"`, key at
+  `.preAuthKey.key`) with the API key in `~/.config/pixel_cluster/headscale-api-key`; no ssh to the
+  DO box is needed any more. `tailscale up --authkey file:/dev/stdin` does not work over a non-tty
+  ssh session; the key goes into a mode-600 temp file instead.
+- **dockerd keeps dialing IPv6 after the sysctl** until restarted: the first Traefik pull failed with
+  `dial tcp [2600:...]:443`. The script restarts docker once when it first writes the sysctl.
+- Dokploy's `server.setup` reported done after 5 min but had only reached the Traefik pull; running
+  its script again by hand (idempotent) installed Traefik 3.6.25 and nixpacks. railpack's GitHub
+  download failed (HTTP/2 reset); not needed for image deploys.
+- Swarm advertise address is the public exit IP (`135.180.36.137`): harmless for a one-node swarm,
+  wrong for the phase-two phone swarm, which must use the guest's LAN address.
+- The phone sat in landscape with auto-rotate on; `settings put system accelerometer_rotation 0`
+  and `user_rotation 0` did not take effect immediately. Taps were done in landscape coordinates.
+

@@ -58,25 +58,26 @@ echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel"
 
 # 3. VM up and reachable on 9922 through an adb forward -------------------------------------
 step "3 Podroid VM"
-adb -s "$SERIAL" forward tcp:9922 tcp:9922 >/dev/null
-vm_up() { timeout 4 bash -c 'exec 3<>/dev/tcp/127.0.0.1/9922 && head -c 7 <&3' 2>/dev/null | grep -q SSH; }
+# host port is per phone (adb allocates), so several attached phones never collide on 9922
+LOCAL_PORT=$(adb -s "$SERIAL" forward tcp:0 tcp:9922)
+vm_up() { timeout 4 bash -c "exec 3<>/dev/tcp/127.0.0.1/$LOCAL_PORT && head -c 7 <&3" 2>/dev/null | grep -q SSH; }
 if ! vm_up; then
   adb -s "$SERIAL" shell am start -a com.excp.podroid.action.START_VM >>"$LOG_FILE" 2>&1 || true
   for _ in $(seq 1 36); do vm_up && break; sleep 5; done
 fi
 if ! vm_up; then
   cat <<MSG
-   The VM is not answering on 9922. If this is the phone's first run, finish Podroid's wizard on
+   The VM is not answering on guest port 22 (dropbear, via adb forward $LOCAL_PORT). If this is the phone's first run, finish Podroid's wizard on
    the phone (docs/runbook.md §2: load balance OFF, 32 GB, 2 GB RAM, 4 cores, Unlimited, SSH ON),
    then switch on Settings > Start VM on boot, start the VM, and re-run this script.
 MSG
   exit 2
 fi
-echo "   dropbear answering on 9922"
+echo "   dropbear answering (adb forward $LOCAL_PORT -> 9922)"
 
 # 4. Guest shell access: operator key, else first-boot password --------------------------------
-SSH_OPTS=(-p 9922 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
-ASKPASS=$(mktemp); printf '#!/bin/sh\necho podroid\n' > "$ASKPASS"; chmod +x "$ASKPASS"; trap 'rm -f "$ASKPASS"' EXIT
+SSH_OPTS=(-p "$LOCAL_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+ASKPASS=$(mktemp); printf '#!/bin/sh\necho podroid\n' > "$ASKPASS"; chmod +x "$ASKPASS"; trap 'rm -f "$ASKPASS"; adb -s "$SERIAL" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1' EXIT
 gsh() { # run a command in the guest
   if ssh "${SSH_OPTS[@]}" -o BatchMode=yes root@127.0.0.1 true </dev/null 2>/dev/null; then ssh "${SSH_OPTS[@]}" -o BatchMode=yes root@127.0.0.1 "$@"
   else SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force ssh "${SSH_OPTS[@]}" -o PreferredAuthentications=password root@127.0.0.1 "$@"; fi
@@ -99,7 +100,10 @@ grep -q '^Include /etc/ssh/sshd_config.d' /etc/ssh/sshd_config || sed -i '1i Inc
 ssh-keygen -A >/dev/null 2>&1; rc-update -q add sshd default; rc-service -q sshd restart >/dev/null
 sed -i 's#^root:x:0:0:root:/root:/bin/sh#root:x:0:0:root:/root:/bin/bash#' /etc/passwd
 # tethering hands the guest a global IPv6 address with no route; dockerd then fails pulls over v6
-printf 'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n' > /etc/sysctl.d/90-no-ipv6.conf; sysctl -q -p /etc/sysctl.d/90-no-ipv6.conf
+if [ ! -f /etc/sysctl.d/90-no-ipv6.conf ]; then
+  printf 'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n' > /etc/sysctl.d/90-no-ipv6.conf; sysctl -q -p /etc/sysctl.d/90-no-ipv6.conf
+  rc-service -q docker restart >/dev/null 2>&1 || true   # dockerd keeps dialing v6 until restarted
+fi
 grep -q '^DROPBEAR_OPTS="-s"' /etc/conf.d/dropbear || { sed -i 's/^DROPBEAR_OPTS=.*/DROPBEAR_OPTS="-s"/' /etc/conf.d/dropbear; rc-service -q dropbear restart >/dev/null; }
 rc-update -q add tailscale default; rc-service -q tailscale start >/dev/null 2>&1 || true
 rc-update -q add crond default; rc-service -q crond start >/dev/null 2>&1 || true
@@ -121,11 +125,12 @@ else
     KEY=$("$HS_CMD" preauthkeys create --user "$HS_USER_ID" --expiration 1h 2>/dev/null | tail -1)
   fi
   [ -n "$KEY" ] || die "could not mint a headscale preauth key (no $HS_KEYFILE and hs via ssh failed)"
-  printf '%s' "$KEY" | gsh "tailscale up --login-server $HS_URL --authkey file:/dev/stdin --hostname $NAME --accept-dns=false" >>"$LOG_FILE" 2>&1
+  # key travels on stdin into a mode-600 temp file, never on a command line
+  printf '%s' "$KEY" | gsh "umask 077; cat > /tmp/.authkey; tailscale up --login-server $HS_URL --authkey file:/tmp/.authkey --hostname $NAME --accept-dns=false; rc=\$?; rm -f /tmp/.authkey; exit \$rc" >>"$LOG_FILE" 2>&1 || die "tailscale up failed in the guest (see $LOG_FILE)"
   echo "   joined"
 fi
 grep -q "^$SERIAL " pins/phones 2>/dev/null || echo "$SERIAL $NAME" >> pins/phones
-TS_JSON=$(mktemp); trap 'rm -f "$ASKPASS" "$TS_JSON"' EXIT
+TS_JSON=$(mktemp); trap 'rm -f "$ASKPASS" "$TS_JSON"; adb -s "$SERIAL" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1' EXIT
 IP=""
 for _ in $(seq 1 24); do tailscale status --json > "$TS_JSON" 2>/dev/null; IP=$(node_ip_by_hostname "$TS_JSON" "$NAME" 2>/dev/null) && break; sleep 5; done
 [ -n "$IP" ] || die "node $NAME not visible in tailscale status after 2 minutes"
