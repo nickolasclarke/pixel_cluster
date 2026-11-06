@@ -210,6 +210,29 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
 - Tailscale SSH: skipped; OpenSSH with keys over the tailnet already covers it and the policy
   allows non-root users only.
 
+## Tether address loss and tailscaled respawn (2026-11-06)
+
+Seen on the 6 Pro after the phone changed Wi-Fi: the guest dropped off the tailnet and off the
+adb-forwarded 9922 for 15+ minutes until the VM was restarted. Root cause is in Podroid's
+`/etc/init.d/podroid-network`: on the AVF backend it runs `udhcpc -q -n` once at boot and never
+renews, while Android hands out a fresh tether subnet whenever tethering restarts (seen
+172.19.72.x -> 172.17.92.x on the Pixel 7, 10.13.42.x on the 6 Pro). After a re-tether the guest
+keeps a dead address; tailscaled's DERP reads time out, its wgengine watchdog fires and it exits 1.
+(The guest logs are zero-filled after that exit because the VM was later force-stopped, so whether
+supervise-daemon respawned it is unknown.) Two fixes, both in the provisioner's guest step:
+
+- `guest/tailnet-keepalive` replaces the inline ping loop: same 20 s ping to the box, and after 3
+  consecutive misses it re-runs udhcpc one-shot on eth0 and restarts tailscaled. Tested on the Pixel
+  7 by flushing eth0: back on the tailnet in 86 s with no hands. Unit-tested with stubbed
+  `tailscale`/`udhcpc`/`rc-service` in `tests/test_tailnet_keepalive.sh`.
+- `/etc/conf.d/tailscale` gets `respawn_max=0` (unlimited) and `respawn_delay=5`. OpenRC's
+  default `respawn_max=10` with no `respawn_period` counts over the service's whole lifetime, after
+  which a crashed tailscaled stays down for good.
+
+Also noted: with `adb tcpip 5555` adbd listens on every interface (`*:5555`), as do the Podroid
+forwards (8080, 8443, 9922, 30000-30009), so they are reachable from whatever Wi-Fi the phone is on.
+Accepted for now; the Android app's tailnet address is the intended path.
+
 ## Screen off and Doze (tested 2026-11-06)
 
 With Podroid on the deviceidle whitelist plus `RUN_ANY_IN_BACKGROUND`/`RUN_IN_BACKGROUND` allowed,

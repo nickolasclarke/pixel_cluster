@@ -1,0 +1,26 @@
+#!/bin/sh
+# tailnet-keepalive <dokploy box tailnet IP>
+# Keeps the guest reachable from the Dokploy box. The box can only reach the guest over a direct
+# UDP path that the guest must keep warm (NAT mappings expire in under a minute), so this pings the
+# box every KEEPALIVE_INTERVAL seconds. After KEEPALIVE_FAILS consecutive misses it assumes the
+# tether moved: Podroid's init runs udhcpc once at boot and never renews, and Android hands out a
+# fresh subnet every time tethering restarts (phone changed Wi-Fi), which leaves the guest on a dead
+# address. Re-leasing the address and restarting tailscaled brings it back.
+BOX=${1:?usage: tailnet-keepalive <dokploy box tailnet IP>}
+INTERVAL=${KEEPALIVE_INTERVAL:-20}
+LIMIT=${KEEPALIVE_FAILS:-3}
+IFACE=${KEEPALIVE_IFACE:-eth0}
+misses=0
+while :; do
+  if tailscale ping -c 1 --timeout 5s "$BOX" >/dev/null 2>&1; then
+    misses=0
+  else
+    misses=$((misses + 1))
+    if [ "$misses" -ge "$LIMIT" ]; then
+      misses=0
+      udhcpc -i "$IFACE" -t 8 -T 1 -A 1 -q -f -n >/dev/null 2>&1
+      rc-service tailscale restart >/dev/null 2>&1
+    fi
+  fi
+  sleep "$INTERVAL"
+done

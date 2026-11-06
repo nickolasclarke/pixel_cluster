@@ -102,6 +102,7 @@ gsh() { # run a command in the guest
 step "5 guest packages, sshd:$GUEST_SSH_PORT, keys, cron, forwards"
 DOKPLOY_PUB=$(dk_get sshKey.all | python3 -I -c 'import sys,json; print([k for k in json.load(sys.stdin) if k["sshKeyId"]==sys.argv[1]][0]["publicKey"].strip())' "$DOKPLOY_SSHKEY_ID")
 OPERATOR_PUB=$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null) || die "no ~/.ssh/id_ed25519.pub or id_rsa.pub: the operator key is installed in every guest"
+KEEPALIVE_B64=$(base64 -w0 guest/tailnet-keepalive)
 FORWARDS=$(awk '{printf "/usr/local/bin/podroid-forward list | grep -q \"^%s %s %s\" || /usr/local/bin/podroid-forward add %s %s %s\n",$1,$2,$3,$1,$2,$3}' pins/forwards)
 gsh "bash -sx" 2>>"$LOG_FILE" <<GUEST || die "guest configuration failed (see $LOG_FILE)"
 set -e
@@ -120,15 +121,19 @@ if [ ! -f /etc/sysctl.d/90-no-ipv6.conf ]; then
   rc-service -q docker restart >/dev/null 2>&1 || true   # dockerd keeps dialing v6 until restarted
 fi
 grep -q '^DROPBEAR_OPTS="-s"' /etc/conf.d/dropbear || { sed -i 's/^DROPBEAR_OPTS=.*/DROPBEAR_OPTS="-s"/' /etc/conf.d/dropbear; rc-service -q dropbear restart >/dev/null; }
+# supervise-daemon's default respawn_max=10 counts over the service's whole lifetime, after which a
+# crashed tailscaled stays down for good; respawn forever instead, with a short pause.
+grep -q '^respawn_max=' /etc/conf.d/tailscale || { printf '\n# respawn forever (default respawn_max=10 is for the whole service lifetime)\nrespawn_max=0\nrespawn_delay=5\n' >> /etc/conf.d/tailscale; rc-service -q tailscale stop >/dev/null 2>&1 || true; }
 rc-update -q add tailscale default; rc-service -q tailscale start >/dev/null 2>&1 || true
-# keepalive: the DO box can only reach this guest while the guest keeps the direct UDP path warm;
-# NAT mappings on the way expire in well under a minute, so a cron was too slow.
+# keepalive: keeps the direct UDP path to the DO box warm and re-leases the tether address when the
+# box stays unreachable (see guest/tailnet-keepalive); a cron was too slow for the NAT mappings.
 crontab -l 2>/dev/null | grep -v 'tailscale ping' | crontab - 2>/dev/null || true
+mkdir -p /usr/local/sbin; echo '$KEEPALIVE_B64' | base64 -d > /usr/local/sbin/tailnet-keepalive; chmod +x /usr/local/sbin/tailnet-keepalive
 cat > /etc/init.d/tailnet-keepalive <<'RC'
 #!/sbin/openrc-run
-description="Ping the Dokploy box every 20 s so the direct tailnet path stays open"
-command="/bin/sh"
-command_args="-c 'while :; do /usr/bin/tailscale ping -c 1 --timeout 5s $DOKPLOY_BOX_IP >/dev/null 2>&1; sleep 20; done'"
+description="Keep the direct tailnet path to the Dokploy box open and recover the tether address"
+command="/usr/local/sbin/tailnet-keepalive"
+command_args="$DOKPLOY_BOX_IP"
 command_background=yes
 pidfile="/run/tailnet-keepalive.pid"
 depend() { need tailscale; }
