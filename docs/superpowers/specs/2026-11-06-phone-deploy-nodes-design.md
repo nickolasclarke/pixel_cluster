@@ -37,7 +37,7 @@ other phones are a loop, not a repeat.
 
 - Opening the Dokploy panel to the internet. The panel stays behind its Traefik IP allowlist;
   the CLI reaches it over the tailnet at `100.64.0.7:3000`.
-- Installing an APK whose checksum or signing certificate cannot be verified.
+- Installing an APK whose checksum does not match the vendor-published digest.
 - Storing the Dokploy ssh private key, headscale preauth keys, or API tokens in this repo.
 
 ## Constraints and facts verified today
@@ -65,9 +65,10 @@ other phones are a loop, not a repeat.
   boot" exists in Settings. Intents `com.excp.podroid.action.START_VM` and `STOP_VM` exist.
 - Verification sources: Tailscale publishes `<apk>.sha256` next to each file at
   `pkgs.tailscale.com/stable/`; GitHub's release API returns a `digest` (sha256) per Podroid
-  asset. Neither vendor publishes a detached signature, so the signing certificate of each
-  APK is pinned after the first verified install. Pinning needs `apksigner` (Debian package
-  `apksigner`), not yet installed on this laptop.
+  asset. Neither vendor publishes a detached signature. Signer-certificate pinning was
+  considered and dropped (Nick's call): Android itself refuses to update an installed app
+  with one signed by a different key, so checksums on the laptop plus that on-device check
+  are the supply-chain controls.
 - The Pixel 7 is `28161FDH200LY1`, Android 16, unrooted, with no Podroid or Tailscale installed.
 
 ## Approaches considered
@@ -87,11 +88,11 @@ other phones are a loop, not a repeat.
 
 ```
 pixel_cluster/
-  bin/apk-fetch        # vendor update check, download, verify, cert pin
+  bin/apk-fetch        # vendor update check, download, verify checksum
   bin/phone-provision  # one phone, start to Dokploy-validated
   bin/phone-status     # what is installed/registered on each attached phone
   apks/                # git-ignored; downloaded, verified APKs
-  pins/                # committed: signer cert fingerprints and last-known versions
+  pins/                # committed: last-known versions and the port-forward list
   docs/                # runbook with the manual GUI steps and screenshots
 ```
 
@@ -105,14 +106,9 @@ For each app (`tailscale`, `podroid`):
 1. Ask the vendor for the latest version: Tailscale by scraping the stable index, Podroid via
    `gh api repos/ExTV/Podroid/releases/latest`.
 2. Compare with `pins/<app>.version`. Exit 0 with "up to date" if equal, unless `--force`.
-3. Download into `apks/`, verify sha256 against the vendor-published digest, and verify the
-   APK signature with `apksigner verify --print-certs`. The signer SHA-256 must equal
-   `pins/<app>.signer`. A mismatch deletes the file and exits non-zero.
+3. Download into `apks/` and verify sha256 against the vendor-published digest. A mismatch
+   deletes the file and exits non-zero.
 4. On success, update `pins/<app>.version` and print the new version.
-
-The first run for each app, with `--trust-on-first-use`, writes the signer pin after the
-checksum passes. Android itself also refuses an update signed by a different key, which is a
-second line of defence on-device.
 
 ### Spike first: validate Dokploy against one Podroid guest by hand
 
@@ -173,4 +169,3 @@ Dokploy server status. This is the "are we behind?" view for the fleet.
 - What `dokploy server setup` actually runs, and whether to skip it.
 - Podroid's VM sizing for the Pixel 7 (my call: 2 cores, 2 GB RAM, 32 GB disk, revisit after
   the smoke test).
-- Whether `apksigner` from apt is recent enough for v3 signatures on these APKs.
