@@ -55,6 +55,7 @@ if [ "$(adb -s "$SERIAL" shell locksettings get-disabled | tr -d '\r')" != "true
     echo "   NOTE: a PIN/pattern is set; clear it once with: adb -s $SERIAL shell locksettings clear --old <PIN>"
 fi
 echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel"
+bin/phone-debloat "$SERIAL" | head -1 | sed "s/^/   debloat: /"
 
 # 3. VM up and reachable on 9922 through an adb forward -------------------------------------
 step "3 Podroid VM"
@@ -107,8 +108,20 @@ if [ ! -f /etc/sysctl.d/90-no-ipv6.conf ]; then
 fi
 grep -q '^DROPBEAR_OPTS="-s"' /etc/conf.d/dropbear || { sed -i 's/^DROPBEAR_OPTS=.*/DROPBEAR_OPTS="-s"/' /etc/conf.d/dropbear; rc-service -q dropbear restart >/dev/null; }
 rc-update -q add tailscale default; rc-service -q tailscale start >/dev/null 2>&1 || true
-rc-update -q add crond default; rc-service -q crond start >/dev/null 2>&1 || true
-crontab -l 2>/dev/null | grep -q 'tailscale ping' || (crontab -l 2>/dev/null; echo '*/1 * * * * /usr/bin/tailscale ping -c 1 --timeout 5s $DOKPLOY_BOX_IP >/dev/null 2>&1') | crontab -
+# keepalive: the DO box can only reach this guest while the guest keeps the direct UDP path warm;
+# NAT mappings on the way expire in well under a minute, so a cron was too slow.
+crontab -l 2>/dev/null | grep -v 'tailscale ping' | crontab - 2>/dev/null || true
+cat > /etc/init.d/tailnet-keepalive <<'RC'
+#!/sbin/openrc-run
+description="Ping the Dokploy box every 20 s so the direct tailnet path stays open"
+command="/bin/sh"
+command_args="-c 'while :; do /usr/bin/tailscale ping -c 1 --timeout 5s $DOKPLOY_BOX_IP >/dev/null 2>&1; sleep 20; done'"
+command_background=yes
+pidfile="/run/tailnet-keepalive.pid"
+depend() { need tailscale; }
+RC
+sed -i "s/\$DOKPLOY_BOX_IP/$DOKPLOY_BOX_IP/" /etc/init.d/tailnet-keepalive
+chmod +x /etc/init.d/tailnet-keepalive; rc-update -q add tailnet-keepalive default; rc-service -q tailnet-keepalive restart >/dev/null 2>&1 || rc-service -q tailnet-keepalive start >/dev/null 2>&1
 $FORWARDS
 echo "   guest configured (\$(tailscale version | head -1), sshd on $GUEST_SSH_PORT, \$(/usr/local/bin/podroid-forward list | wc -l) forwards)"
 GUEST

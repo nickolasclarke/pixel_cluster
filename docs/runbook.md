@@ -163,3 +163,13 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
   script (100.64.0.9 -> 100.64.0.11).
 - `bin/phone-debloat` disabled 64 packages with nothing refused. The launcher, Settings and Podroid
   kept working. Memory numbers before/after are in the session summary below the table.
+
+## Keepalive and debloat (2026-11-06, later)
+
+- Dokploy lost the Pixel 6 Pro for a while ("Timed out while waiting for handshake") although the
+  laptop still reached it; a guest-side `tailscale ping` restored it at once. The per-minute cron was
+  too slow for the UDP NAT timeouts on this path. Replaced by the OpenRC service `tailnet-keepalive`
+  (ping the box every 20 s), installed by the provisioner and applied to both guests.
+- `bin/phone-debloat` now runs from `bin/phone-provision` step 2, and the list includes Play services
+  and the keyboard. Pixel 7 after: 4.7 GB available with the 4 GB VM running; Pixel 6 Pro: 6.6 GB.
+  Launcher, Settings, Podroid and the Tailscale app still work; adb text injection needs no IME.
