@@ -191,7 +191,22 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
 - Android: `adb tcpip 5555` once over USB (Nick runs it; it exposes a service), then
   `adb connect <phone LAN IP>:5555`. The scripts accept `host:port` wherever they take a serial and
   key names/pins on the real serial. Lost on reboot without root. Reaching ADB from outside the LAN
-  needs the Tailscale Android app logged in on the phone (not done on either phone yet).
+  needs the Tailscale Android app logged in on the phone (done, see below): `adb connect <phone
+  tailnet IP>:5555`.
+- Tailscale Android app login (done on both phones 2026-11-06, driven over adb with `uiautomator
+  dump` + `input tap`): accept the VPN consent dialog (it only appears with the screen on; with the
+  screen off the app shows "VPN permission needed", tap Try again), tap Get Started and close the
+  Chrome tab it opens, then Settings > Accounts > kebab menu > "Use an alternate server"
+  (`https://hs.nclar.ke`, Add account, close Chrome again) and kebab > "Use an auth key" with a
+  headscale preauth key from the REST API. The phone registers as `<model>` (e.g. `pixel-7`,
+  100.64.0.12); the 6 Pro got `pixel-6-pro-1` (100.64.0.13) because a stale offline `pixel-6-pro`
+  node (id 6) held the name. The Android app's VPN does not touch the tethered guest: both guests
+  still ping dokploy and run traefik with it up.
+- Start on boot: Android Settings > Network & internet > VPN > Tailscale gear > "Always-on VPN"
+  (on; "Block connections without VPN" left off so tethering and non-tailnet traffic keep working).
+  Verifiable with `settings get secure always_on_vpn_app` = `com.tailscale.ipn`. This is the only
+  supported route without device owner; `settings put` on that key is reported not to take effect.
+  Not yet verified across a real reboot.
 - Tailscale SSH: skipped; OpenSSH with keys over the tailnet already covers it and the policy
   allows non-root users only.
 
