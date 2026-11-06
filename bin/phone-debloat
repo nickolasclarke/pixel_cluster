@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# phone-debloat — disable the user-facing Google/AOSP apps a headless Podroid node never needs,
+# so Android keeps less resident and runs fewer background services. Reversible.
+#
+# Usage: bin/phone-debloat <adb-serial> [--undo]
+#   --undo   re-enable every package in pins/disable-packages that is currently disabled
+# Uses `pm disable-user --user 0` (no root). The list lives in pins/disable-packages.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# shellcheck disable=SC1091
+source bin/lib.sh
+
+UNDO=0; SERIAL=""
+for a in "$@"; do case "$a" in --undo) UNDO=1 ;; -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) SERIAL=$a ;; esac; done
+[ -n "$SERIAL" ] || die "usage: bin/phone-debloat <adb-serial> [--undo]"
+adb -s "$SERIAL" get-state >/dev/null 2>&1 || die "adb cannot see $SERIAL"
+
+LIST=$(mktemp); trap 'rm -f "$LIST"' EXIT
+if [ "$UNDO" = 1 ]; then
+  adb -s "$SERIAL" shell pm list packages -d > "$LIST"
+  n=0; for p in $(packages_to_disable "$LIST" pins/disable-packages); do adb -s "$SERIAL" shell pm enable "$p" >>"$LOG_FILE" 2>&1 && n=$((n+1)); done
+  echo "re-enabled $n packages"
+else
+  adb -s "$SERIAL" shell pm list packages -e > "$LIST"
+  n=0; f=0
+  for p in $(packages_to_disable "$LIST" pins/disable-packages); do
+    if adb -s "$SERIAL" shell pm disable-user --user 0 "$p" 2>>"$LOG_FILE" | grep -q 'disabled-user'; then n=$((n+1)); else f=$((f+1)); log "could not disable $p"; fi
+  done
+  echo "disabled $n packages ($f could not be disabled; see $LOG_FILE)"
+fi
+adb -s "$SERIAL" shell "grep MemAvailable /proc/meminfo"
+echo "log: $LOG_FILE"

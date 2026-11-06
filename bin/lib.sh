@@ -137,3 +137,10 @@ for n in json.load(open(sys.argv[1]))["nodes"]:
         print(n["id"]); break
 PY
 }
+
+# --- phone-debloat helpers ---
+packages_to_disable() { # <pm-list-packages-e output file> <disable-list file> → packages that are listed and currently enabled
+  grep -vE '^\s*(#|$)' "$2" | sort -u > "${TMPDIR:-/tmp}/.want.$$"
+  sed 's/^package://' "$1" | sort -u | comm -12 - "${TMPDIR:-/tmp}/.want.$$"
+  rm -f "${TMPDIR:-/tmp}/.want.$$"
+}

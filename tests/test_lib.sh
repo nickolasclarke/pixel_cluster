@@ -58,3 +58,6 @@ assert_eq "none" "$(node_state tests/fixtures/ts-status-dup.json pixel-7-podroid
 assert_eq "9" "$(stale_node_id tests/fixtures/hs-nodes.json pixel-7-podroid)" "stale_node_id: offline node of that name"
 assert_eq "" "$(stale_node_id tests/fixtures/hs-nodes.json pixel-9-podroid)" "stale_node_id: no node is empty"
 assert_fails "stale_node_id: online node of that name exits 1" stale_node_id tests/fixtures/hs-nodes.json pixel-6-pro-podroid
+
+# --- phone-debloat ---
+assert_eq "com.android.vending com.google.android.youtube" "$(packages_to_disable tests/fixtures/pm-enabled.txt pins/disable-packages | sort | tr '\n' ' ' | sed 's/ $//')" "packages_to_disable: listed AND currently enabled, comments ignored"
