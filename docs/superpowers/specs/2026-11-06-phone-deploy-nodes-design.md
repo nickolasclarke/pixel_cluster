@@ -33,8 +33,9 @@ other phones are a loop, not a repeat.
 - Phase two, not here: a phone-only swarm. One phone is the manager and Dokploy's remote
   server; the others join it as workers over the local Wi-Fi. Dokploy deploys to the manager
   and swarm spreads tasks. Needs prebuilt images or a registry, and node labels for the slow
-  (QEMU) vs fast (AVF) phones. Decided after the Pixel 7 spike shows how one phone behaves.
-- Performance tuning. Pixel 7 has no pKVM, so the VM runs under QEMU TCG and is slow.
+  (QEMU) vs fast (AVF) phones if any phone lacks AVF; both provisioned so far have it.
+- Performance tuning. (Written before the spike: Podroid's docs list AVF as Pixel 8+, but the
+  Pixel 7 and Pixel 6 Pro both run the guest under AVF/pKVM via crosvm; see the runbook.)
 - Driving the Podroid or Tailscale GUIs from a script. First-run wizards are done by hand
   (scrcpy is available). Everything after the wizards is scripted.
 
@@ -64,7 +65,8 @@ other phones are a loop, not a repeat.
   the Pixel 6 Pro and Pixel 7a were registered. Preauth keys are not used for phones.
 - Podroid port forwards can be managed from inside the guest with `podroid-forward`, so the
   provisioning script owns them over ssh. Host ports below 1024 cannot be bound on the phone.
-- Podroid: guest IP `10.0.2.15` behind QEMU SLIRP NAT; port forwards bind `0.0.0.0` on the
+- Podroid (per its docs; the AVF guest instead gets DHCP from Android tethering): guest IP
+  `10.0.2.15` behind QEMU SLIRP NAT; port forwards bind `0.0.0.0` on the
   phone, so Dokploy can reach the guest's dropbear at `<phone tailnet IP>:9922`. Android 12+
   kills backgrounded QEMU unless the phantom-process limit is raised over adb. "Start VM on
   boot" exists in Settings. Intents `com.excp.podroid.action.START_VM` and `STOP_VM` exist.

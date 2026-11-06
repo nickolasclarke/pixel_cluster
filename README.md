@@ -26,5 +26,5 @@ the Dokploy ssh private key stays in Dokploy. `apks/` is git-ignored.
 ## Later: a phone-only swarm
 
 One phone as swarm manager and Dokploy's remote server, the others joining it over the local Wi-Fi.
-Needs prebuilt images or a registry and node labels for slow (QEMU) vs fast (AVF) phones. Decided
+Needs prebuilt images or a registry, and node labels if any phone lacks AVF (both so far have it). Decided
 after more than one phone is provisioned.

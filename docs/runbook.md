@@ -60,7 +60,7 @@ Launch `com.excp.podroid`. Tap coordinates are for 1080x2400.
 |---|---|---|
 | 1 Storage | size | 32 GB (only selectable after step 2's Load balance is off; go Back) |
 | 2 Configure | Load balance | **off** |
-| 2 | RAM / cores / bandwidth | 2 GB / 4 / Unlimited (Podroid says 8 cores is slower than 4 on QEMU) |
+| 2 | RAM / cores / bandwidth | the largest RAM Podroid offers (it reserves ~3 GB for Android: 4 GB on an 8 GB phone, 8 GB on 12 GB), top core count (on AVF anything above 1 means all cores), Unlimited. Decided 2026-11-06: the phones do nothing else. Earlier phones were 2 GB / 4 cores. |
 | 2 | SSH access | on |
 | 3 Downloads sharing | | off |
 | 4 USB passthrough | | off |
@@ -139,3 +139,11 @@ Dokploy server `pixel-6-pro-podroid`, nginx smoke test at `http://100.64.0.10:30
 - The phone sat in landscape with auto-rotate on; `settings put system accelerometer_rotation 0`
   and `user_rotation 0` did not take effect immediately. Taps were done in landscape coordinates.
 
+
+## Sizing policy (2026-11-06)
+
+The phones do nothing else, so: top core count (AVF uses all cores for anything above 1), the
+largest RAM Podroid offers (it keeps ~3 GB for Android, which is what stops Android killing the VM),
+and the largest disk that still leaves Android about 10 GB (64 GB on a 128 GB phone). Set Battery >
+Charging optimization to the 80 % limit; these sit on power permanently and all-core load throttles
+thermally. RAM and CPU changes need a VM stop; pick them in the wizard on a fresh phone.
