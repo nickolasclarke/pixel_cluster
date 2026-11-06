@@ -134,7 +134,7 @@ Dokploy server `pixel-6-pro-podroid`, nginx smoke test at `http://100.64.0.10:30
 - Dokploy's `server.setup` reported done after 5 min but had only reached the Traefik pull; running
   its script again by hand (idempotent) installed Traefik 3.6.25 and nixpacks. railpack's GitHub
   download failed (HTTP/2 reset); not needed for image deploys.
-- Swarm advertise address is the public exit IP (`135.180.36.137`): harmless for a one-node swarm,
+- Swarm advertise address is the public exit IP (`<router-wg-exit-ip>`): harmless for a one-node swarm,
   wrong for the phase-two phone swarm, which must use the guest's LAN address.
 - The phone sat in landscape with auto-rotate on; `settings put system accelerometer_rotation 0`
   and `user_rotation 0` did not take effect immediately. Taps were done in landscape coordinates.
