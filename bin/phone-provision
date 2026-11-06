@@ -20,6 +20,7 @@ for a in "$@"; do case "$a" in --reinstall) REINSTALL=1 ;; -h|--help) sed -n '2,
 [ -n "$SERIAL" ] || die "usage: bin/phone-provision <adb-serial>"
 adb -s "$SERIAL" get-state >/dev/null 2>&1 || die "adb cannot see $SERIAL (unauthorized or unplugged?)"
 
+HS_USER_ID=1   # headscale user "nick"
 HS_URL="https://hs.nclar.ke"; HS_KEYFILE="$HOME/.config/pixel_cluster/headscale-api-key"; HS_CMD="$HOME/repos/headscale-cn/commands/hs"
 DOKPLOY_BOX_IP="100.64.0.7"; DOKPLOY_SSHKEY_ID="46etDVagTkjFQka2nEbhV"; GUEST_SSH_PORT=2222
 MODEL=$(adb -s "$SERIAL" shell getprop ro.product.model | tr -d '\r')
@@ -29,7 +30,8 @@ step() { echo "== $*"; log "$*"; }
 # 1. APKs ----------------------------------------------------------------------------------
 step "1 apks ($MODEL, node name $NAME)"
 while read -r app pkg <&3; do
-  apk=$(find apks -maxdepth 1 -iname "${app}*.apk" -printf '%f\n' | sort | tail -1); [ -n "$apk" ] || die "no $app APK in apks/ (run bin/apk-fetch)"
+  pin=$(cat "pins/$app.version" 2>/dev/null) || die "no pins/$app.version (run bin/apk-fetch)"
+  apk=$(find apks -maxdepth 1 -iname "${app}*${pin#v}*.apk" -printf '%f\n' | head -1); [ -n "$apk" ] || die "no $app $pin APK in apks/ (run bin/apk-fetch)"
   if [ "$REINSTALL" = 1 ] || [ -z "$(adb_installed_version "$SERIAL" "$pkg")" ]; then
     if adb -s "$SERIAL" install -r "apks/$apk" >>"$LOG_FILE" 2>&1; then echo "   installed $apk"; else die "adb install $apk failed (see $LOG_FILE)"; fi
   else echo "   $pkg already installed (versionCode $(adb_installed_version "$SERIAL" "$pkg"))"; fi
@@ -83,7 +85,7 @@ gsh() { # run a command in the guest
 # 5. Guest configuration (one idempotent remote script) --------------------------------------
 step "5 guest packages, sshd:$GUEST_SSH_PORT, keys, cron, forwards"
 DOKPLOY_PUB=$(dk_get sshKey.all | python3 -I -c 'import sys,json; print([k for k in json.load(sys.stdin) if k["sshKeyId"]==sys.argv[1]][0]["publicKey"].strip())' "$DOKPLOY_SSHKEY_ID")
-OPERATOR_PUB=$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub)
+OPERATOR_PUB=$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null) || die "no ~/.ssh/id_ed25519.pub or id_rsa.pub: the operator key is installed in every guest"
 FORWARDS=$(awk '{printf "/usr/local/bin/podroid-forward list | grep -q \"^%s %s %s\" || /usr/local/bin/podroid-forward add %s %s %s\n",$1,$2,$3,$1,$2,$3}' pins/forwards)
 gsh "bash -sx" 2>>"$LOG_FILE" <<GUEST || die "guest configuration failed (see $LOG_FILE)"
 set -e
@@ -96,6 +98,8 @@ printf 'Port $GUEST_SSH_PORT\nPermitRootLogin prohibit-password\nPasswordAuthent
 grep -q '^Include /etc/ssh/sshd_config.d' /etc/ssh/sshd_config || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
 ssh-keygen -A >/dev/null 2>&1; rc-update -q add sshd default; rc-service -q sshd restart >/dev/null
 sed -i 's#^root:x:0:0:root:/root:/bin/sh#root:x:0:0:root:/root:/bin/bash#' /etc/passwd
+# tethering hands the guest a global IPv6 address with no route; dockerd then fails pulls over v6
+printf 'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n' > /etc/sysctl.d/90-no-ipv6.conf; sysctl -q -p /etc/sysctl.d/90-no-ipv6.conf
 grep -q '^DROPBEAR_OPTS="-s"' /etc/conf.d/dropbear || { sed -i 's/^DROPBEAR_OPTS=.*/DROPBEAR_OPTS="-s"/' /etc/conf.d/dropbear; rc-service -q dropbear restart >/dev/null; }
 rc-update -q add tailscale default; rc-service -q tailscale start >/dev/null 2>&1 || true
 rc-update -q add crond default; rc-service -q crond start >/dev/null 2>&1 || true
@@ -111,13 +115,13 @@ if gsh "tailscale status --self 2>/dev/null | grep -q '^100\.'"; then
 else
   if [ -f "$HS_KEYFILE" ]; then
     KEY=$(curl -sf -m 30 -X POST -H "Authorization: Bearer $(cat "$HS_KEYFILE")" -H 'Content-Type: application/json' \
-      -d "{\"user\":\"1\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)\"}" \
+      -d "{\"user\":\"$HS_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)\"}" \
       "$HS_URL/api/v1/preauthkey" | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["preAuthKey"]["key"])')
   else
-    KEY=$("$HS_CMD" preauthkeys create --user 1 --expiration 1h 2>/dev/null | tail -1)
+    KEY=$("$HS_CMD" preauthkeys create --user "$HS_USER_ID" --expiration 1h 2>/dev/null | tail -1)
   fi
   [ -n "$KEY" ] || die "could not mint a headscale preauth key (no $HS_KEYFILE and hs via ssh failed)"
-  gsh "tailscale up --login-server $HS_URL --authkey '$KEY' --hostname $NAME --accept-dns=false" >>"$LOG_FILE" 2>&1
+  printf '%s' "$KEY" | gsh "tailscale up --login-server $HS_URL --authkey file:/dev/stdin --hostname $NAME --accept-dns=false" >>"$LOG_FILE" 2>&1
   echo "   joined"
 fi
 grep -q "^$SERIAL " pins/phones 2>/dev/null || echo "$SERIAL $NAME" >> pins/phones
@@ -135,7 +139,14 @@ SID=$(find_server_id "$SERVERS" "$NAME"); rm -f "$SERVERS"
 if [ -z "$SID" ]; then
   SID=$(dk_post server.create "{\"name\":\"$NAME\",\"description\":\"$MODEL $SERIAL Podroid guest\",\"ipAddress\":\"$IP\",\"port\":$GUEST_SSH_PORT,\"username\":\"root\",\"sshKeyId\":\"$DOKPLOY_SSHKEY_ID\",\"serverType\":\"deploy\"}" | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["serverId"])')
   echo "   created server $SID"
-else echo "   server exists: $SID"; fi
+else
+  echo "   server exists: $SID"
+  CUR_IP=$(dk_get "server.one?serverId=$SID" | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["ipAddress"])')
+  if [ "$CUR_IP" != "$IP" ]; then
+    dk_post server.update "{\"serverId\":\"$SID\",\"name\":\"$NAME\",\"description\":\"$MODEL $SERIAL Podroid guest\",\"ipAddress\":\"$IP\",\"port\":$GUEST_SSH_PORT,\"username\":\"root\",\"sshKeyId\":\"$DOKPLOY_SSHKEY_ID\",\"serverType\":\"deploy\"}" >/dev/null
+    echo "   updated server IP $CUR_IP -> $IP"
+  fi
+fi
 V=$(dk_get "server.validate?serverId=$SID") || die "dokploy cannot ssh to $IP:$GUEST_SSH_PORT (validate failed)"
 if ! echo "$V" | grep -q '"isMainDirectoryInstalled":true'; then
   echo "   running dokploy setup (apk on the China mirror takes minutes)"

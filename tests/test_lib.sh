@@ -41,3 +41,15 @@ assert_eq "no" "$(version_matches_pin 1.2.8 v1.2.9)" "version behind pin"
 assert_eq "online" "$(node_state tests/fixtures/ts-status.json pixel-7-podroid)" "node_state online"
 assert_eq "none" "$(node_state tests/fixtures/ts-status.json no-such)" "node_state none"
 assert_eq "yes" "$(version_matches_pin 1.104.5-t788384763-gd8673104f 1.104.5)" "version matches pin ignoring build suffix"
+
+# --- final review: duplicate / stale nodes ---
+python3 -I - <<'PY'
+import json
+s=json.load(open("tests/fixtures/ts-status.json"))
+dead={"HostName":"pixel-7-podroid","DNSName":"pixel-7-podroid-1.tn.nclar.ke.","TailscaleIPs":["100.64.0.42"],"Online":False}
+s["Peer"]["dead"]=dead
+json.dump(s,open("tests/fixtures/ts-status-dup.json","w"))
+PY
+assert_eq "100.64.0.9" "$(node_ip_by_hostname tests/fixtures/ts-status-dup.json pixel-7-podroid)" "node ip: DNS label wins over a stale duplicate HostName"
+assert_eq "100.64.0.42" "$(node_ip_by_hostname tests/fixtures/ts-status-dup.json pixel-7-podroid-1)" "node ip: suffixed label is addressable"
+assert_eq "none" "$(node_state tests/fixtures/ts-status-dup.json pixel-7-podroid-2)" "node_state: HostName alone does not match"

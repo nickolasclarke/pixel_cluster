@@ -33,15 +33,15 @@ up_to_date() { # app version → 0 if pinned version equals and not --force
 fetch_tailscale() {
   local index version asset url expected
   index=$(mktemp); trap 'rm -f "$index"' RETURN
-  curl -fsSL "$TS_BASE/" -o "$index" || die "cannot fetch $TS_BASE/"
-  version=$(tailscale_latest_version "$index")
+  curl -fsSL "$TS_BASE/" -o "$index" || { echo "cannot fetch $TS_BASE/" >&2; return 1; }
+  version=$(tailscale_latest_version "$index") || return 1
   if up_to_date tailscale "$version"; then echo "tailscale up to date ($version)"; return; fi
   asset="tailscale-android-universal-$version.apk"; url="$TS_BASE/$asset"
   expected=$(curl -fsSL "$url.sha256" | cut -d' ' -f1)
-  [ ${#expected} -eq 64 ] || die "bad sha256 from $url.sha256"
+  [ ${#expected} -eq 64 ] || { echo "bad sha256 from $url.sha256" >&2; return 1; }
   log "downloading $url"
-  curl -fL --progress-bar "$url" -o "apks/$asset"
-  verify_sha256 "apks/$asset" "$expected"
+  curl -fL --progress-bar "$url" -o "apks/$asset" || { rm -f "apks/$asset"; echo "download failed: $url" >&2; return 1; }
+  verify_sha256 "apks/$asset" "$expected" || return 1
   echo "$version" > pins/tailscale.version
   echo "tailscale $version -> apks/$asset (sha256 ok)"
 }
@@ -49,13 +49,13 @@ fetch_tailscale() {
 fetch_podroid() {
   local json tag asset expected url
   json=$(mktemp); trap 'rm -f "$json"' RETURN
-  gh api "repos/$PODROID_REPO/releases/latest" > "$json" || die "cannot fetch $PODROID_REPO latest release"
-  read -r tag asset expected < <(podroid_latest "$json")
+  gh api "repos/$PODROID_REPO/releases/latest" > "$json" || { echo "cannot fetch $PODROID_REPO latest release" >&2; return 1; }
+  read -r tag asset expected < <(podroid_latest "$json") && [ -n "$expected" ] || return 1
   if up_to_date podroid "$tag"; then echo "podroid up to date ($tag)"; return; fi
   url="https://github.com/$PODROID_REPO/releases/download/$tag/$asset"
   log "downloading $url"
-  curl -fL --progress-bar "$url" -o "apks/$asset"
-  verify_sha256 "apks/$asset" "$expected"
+  curl -fL --progress-bar "$url" -o "apks/$asset" || { rm -f "apks/$asset"; echo "download failed: $url" >&2; return 1; }
+  verify_sha256 "apks/$asset" "$expected" || return 1
   echo "$tag" > pins/podroid.version
   echo "podroid $tag -> apks/$asset (sha256 ok)"
 }

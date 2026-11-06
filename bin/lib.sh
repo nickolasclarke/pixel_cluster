@@ -76,7 +76,7 @@ node_ip_by_hostname() { # <tailscale-status-json> <hostname> → first tailnet I
 import json, sys
 s = json.load(open(sys.argv[1])); want = sys.argv[2]
 for p in list(s.get("Peer", {}).values()) + [s.get("Self", {})]:
-    if p.get("DNSName", "").split(".")[0] == want or p.get("HostName") == want:
+    if p.get("DNSName", "").split(".")[0] == want:   # the label headscale keeps unique, not HostName
         print(p["TailscaleIPs"][0]); sys.exit(0)
 sys.exit(f"no tailnet node named {want}")
 PY
@@ -93,10 +93,11 @@ PY
 
 # --- Dokploy REST (the CLI's own token; several CLI subcommands return 400) ---
 DOKPLOY_URL="${DOKPLOY_URL:-http://100.64.0.7:3000}"
-dokploy_token() {
-  python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' \
-    "$(dirname "$(dirname "$(readlink -f "$(command -v dokploy)")")")/lib/node_modules/@dokploy/cli/config.json" 2>/dev/null \
-    || python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' "$HOME/.local/share/fnm/node-versions/v22.23.1/installation/lib/node_modules/@dokploy/cli/config.json"
+dokploy_token() { # DOKPLOY_TOKEN env, else the token the dokploy CLI saved next to its own dist/
+  if [ -n "${DOKPLOY_TOKEN:-}" ]; then echo "$DOKPLOY_TOKEN"; return; fi
+  local cfg; cfg="$(dirname "$(readlink -f "$(command -v dokploy)")")/../config.json"
+  [ -f "$cfg" ] || die "dokploy CLI not logged in ($cfg missing); run: dokploy auth --url $DOKPLOY_URL --token <token>"
+  python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' "$cfg"
 }
 dk_get() { # <path?query>
   curl -sf -m 90 -H "x-api-key: $(dokploy_token)" "$DOKPLOY_URL/api/$1"
@@ -120,7 +121,7 @@ node_state() { # <tailscale-status-json> <hostname> → online|offline|none
 import json, sys
 s = json.load(open(sys.argv[1])); want = sys.argv[2]
 for p in list(s.get("Peer", {}).values()) + [s.get("Self", {})]:
-    if p.get("DNSName", "").split(".")[0] == want or p.get("HostName") == want:
+    if p.get("DNSName", "").split(".")[0] == want:
         print("online" if p.get("Online") else "offline"); sys.exit(0)
 print("none")
 PY
