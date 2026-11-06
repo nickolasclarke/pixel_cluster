@@ -66,3 +66,8 @@ assert_eq "com.android.vending com.google.android.youtube" "$(packages_to_disabl
 assert_eq "80%" "$(charge_limit_label 1)" "charge_limit_label: mode 1 is the 80% cap"
 assert_eq "full" "$(charge_limit_label 0)" "charge_limit_label: mode 0 charges to full"
 assert_eq "full" "$(charge_limit_label null)" "charge_limit_label: unset charges to full"
+
+# docker_daemon_json_overlay2: merges "features.containerd-snapshotter=false" into existing daemon.json content
+assert_eq '{"features": {"containerd-snapshotter": false}}' "$(docker_daemon_json_overlay2 '')" "daemon.json created when absent"
+assert_eq '{"log-driver": "json-file", "features": {"containerd-snapshotter": false}}' "$(docker_daemon_json_overlay2 '{"log-driver":"json-file"}')" "daemon.json keeps existing top-level keys"
+assert_eq '{"features": {"buildkit": true, "containerd-snapshotter": false}}' "$(docker_daemon_json_overlay2 '{"features":{"buildkit":true,"containerd-snapshotter":true}}')" "daemon.json keeps other features and overrides the snapshotter"

@@ -154,3 +154,13 @@ adb_real_serial() { # <adb -s target> → ro.serialno
 charge_limit_label() { # <charge_optimization_mode value> → 80%|full
   [ "$1" = 1 ] && echo "80%" || echo full
 }
+
+docker_daemon_json_overlay2() { # <current daemon.json content or empty> -> content with the containerd image store off
+  # containerd's overlayfs snapshotter on the Podroid guest unpacks hard-linked files as empty
+  # (seen with hermes-agent: 4979 zero-byte .py files); the classic overlay2 driver does not.
+  python3 -I -c '
+import json, sys
+d = json.loads(sys.argv[1]) if sys.argv[1].strip() else {}
+d.setdefault("features", {})["containerd-snapshotter"] = False
+print(json.dumps(d))' "$1"
+}

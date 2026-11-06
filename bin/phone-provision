@@ -103,6 +103,7 @@ step "5 guest packages, sshd:$GUEST_SSH_PORT, keys, cron, forwards"
 DOKPLOY_PUB=$(dk_get sshKey.all | python3 -I -c 'import sys,json; print([k for k in json.load(sys.stdin) if k["sshKeyId"]==sys.argv[1]][0]["publicKey"].strip())' "$DOKPLOY_SSHKEY_ID")
 OPERATOR_PUB=$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null) || die "no ~/.ssh/id_ed25519.pub or id_rsa.pub: the operator key is installed in every guest"
 KEEPALIVE_B64=$(base64 -w0 guest/tailnet-keepalive)
+DAEMON_JSON=$(docker_daemon_json_overlay2 "$(gsh "cat /etc/docker/daemon.json 2>/dev/null" </dev/null)")
 FORWARDS=$(awk '{printf "/usr/local/bin/podroid-forward list | grep -q \"^%s %s %s\" || /usr/local/bin/podroid-forward add %s %s %s\n",$1,$2,$3,$1,$2,$3}' pins/forwards)
 gsh "bash -sx" 2>>"$LOG_FILE" <<GUEST || die "guest configuration failed (see $LOG_FILE)"
 set -e
@@ -115,6 +116,13 @@ printf 'Port $GUEST_SSH_PORT\nPermitRootLogin prohibit-password\nPasswordAuthent
 grep -q '^Include /etc/ssh/sshd_config.d' /etc/ssh/sshd_config || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
 ssh-keygen -A >/dev/null 2>&1; rc-update -q add sshd default; rc-service -q sshd restart >/dev/null
 sed -i 's#^root:x:0:0:root:/root:/bin/sh#root:x:0:0:root:/root:/bin/bash#' /etc/passwd
+# classic overlay2 image store: containerd's snapshotter unpacks hard-linked files as empty here
+mkdir -p /etc/docker
+if [ "\$(cat /etc/docker/daemon.json 2>/dev/null)" != '$DAEMON_JSON' ]; then
+  echo '$DAEMON_JSON' > /etc/docker/daemon.json; rc-service -q docker restart >/dev/null 2>&1
+  # images from the old store are gone; Dokploy's traefik container needs its image back
+  docker start dokploy-traefik >/dev/null 2>&1 || { IMG=\$(docker inspect -f '{{.Config.Image}}' dokploy-traefik 2>/dev/null) && docker pull -q "\$IMG" >/dev/null && docker start dokploy-traefik >/dev/null; } || true
+fi
 # tethering hands the guest a global IPv6 address with no route; dockerd then fails pulls over v6
 if [ ! -f /etc/sysctl.d/90-no-ipv6.conf ]; then
   printf 'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n' > /etc/sysctl.d/90-no-ipv6.conf; sysctl -q -p /etc/sysctl.d/90-no-ipv6.conf
