@@ -177,8 +177,10 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
 ## Reboot behaviour (tested on the Pixel 7, 2026-11-06)
 
 - Android back on USB in ~55 s; the VM auto-starts and the guest is on the tailnet ~10 s later.
-- `adb tcpip 5555` does not survive a reboot (expected without root). Android's Wireless debugging is
-  the candidate for a reboot-proof path; untested.
+- Neither `adb tcpip 5555` nor Android's Wireless debugging survives a reboot (tested: Android
+  turns Wireless debugging off at boot; "Always allow on this network" only skips the dialog).
+  Without root, USB once per reboot is the floor. Wireless debugging needs no pairing when the host's
+  USB adb key is already authorized: `adb mdns services` shows the TLS port, `adb connect ip:port`.
 - `dokploy-traefik` exits at boot ("network ... not found": the swarm overlay is not up yet) and
   Docker's restart loop gives up. `/etc/local.d/dokploy-traefik.start` now re-starts it 45 s after
   boot; the provisioner installs it.
