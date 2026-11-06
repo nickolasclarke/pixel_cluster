@@ -23,12 +23,17 @@ other phones are a loop, not a repeat.
 
 ## Non-goals
 
-- Reaching phones that are in China from the DO box. The October blocker (the phone's home
-  DERP is the Aliyun `cn` relay, unreachable from outside China) is a relay-topology problem,
-  owned by the headscale-cn repo. This work assumes the phone and the DO box share a reachable
-  relay, which is true in the US today.
+- Relay redesign. Nick and the phones are in China, so a phone's home DERP is the Aliyun
+  `cn` relay, which the DO box cannot reach (the October blocker). The first thing the spike
+  proves is a *direct* path instead: udp/41641 is now open on the DO firewall, so a phone can
+  punch straight to the box's public endpoint and no relay is needed. If direct fails, the
+  relay topology goes to the headscale-cn repo or another session, not this one.
 - Joining the DO box's Swarm. Phones are Dokploy "remote servers", not workers of the main
   cluster. (Dokploy makes each remote server its own single-node swarm; that is in scope.)
+- Phase two, not here: a phone-only swarm. One phone is the manager and Dokploy's remote
+  server; the others join it as workers over the local Wi-Fi. Dokploy deploys to the manager
+  and swarm spreads tasks. Needs prebuilt images or a registry, and node labels for the slow
+  (QEMU) vs fast (AVF) phones. Decided after the Pixel 7 spike shows how one phone behaves.
 - Performance tuning. Pixel 7 has no pKVM, so the VM runs under QEMU TCG and is slow.
 - Driving the Podroid or Tailscale GUIs from a script. First-run wizards are done by hand
   (scrcpy is available). Everything after the wizards is scripted.
@@ -112,7 +117,8 @@ For each app (`tailscale`, `podroid`):
 
 ### Spike first: validate Dokploy against one Podroid guest by hand
 
-Before any scripting, on the Pixel 7: install both apps, register, open 9922, install the
+Before any scripting, on the Pixel 7: install both apps, register, confirm from the DO box
+that `tailscale ping <phone>` reports a direct path rather than a relay, open 9922, install the
 Dokploy key, then run `dokploy server setup` and `dokploy server validate` and one deploy by
 hand. Record what setup does on Alpine and whether swarm init and Dokploy's Traefik come up in
 the guest. If this fails in a way that cannot be fixed inside the guest, stop and bring it back
