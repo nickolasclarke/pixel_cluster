@@ -1,112 +1,114 @@
-# Runbook: Pixel 7 spike (2026-11-06)
+# Runbook: one phone, from USB to Dokploy deploy target
 
-What it took to get one phone from "USB-attached" to "Dokploy deploys to it". `bin/phone-provision`
-scripts these steps; this is the record of what was done by hand and what was learned.
+What the Pixel 7 spike (2026-11-06, serial `28161FDH200LY1`) established. `bin/phone-provision`
+scripts the repeatable parts; the rest is here so the next phone is a loop, not a rediscovery.
 
-Phone: Pixel 7, serial `28161FDH200LY1`, Android 16, unrooted. Result: tailnet node
-`pixel-7-podroid` (100.64.0.9), Dokploy server `pixel-7-podroid` (id `3RzoxeV75giJGcgX3ueCM`,
-ssh `root@100.64.0.9:2222`), nginx smoke test answering on `http://100.64.0.9:30000/`.
+## Topology that actually works
 
-## 1. Phone preparation (all over adb)
-
-```sh
-S=28161FDH200LY1
-adb -s $S install -r apks/tailscale-android-universal-1.104.5.apk
-adb -s $S install -r apks/Podroid-v1.2.9-release.apk        # packages: com.tailscale.ipn, com.excp.podroid
-# phantom-process killer fix (Podroid docs, verbatim)
-adb -s $S shell device_config set_sync_disabled_for_tests persistent
-adb -s $S shell device_config put activity_manager max_phantom_processes 2147483647
-adb -s $S shell settings put global settings_enable_monitor_phantom_procs false
-# Podroid permissions, granted without touching the GUI
-adb -s $S shell pm grant com.excp.podroid android.permission.POST_NOTIFICATIONS
-adb -s $S shell dumpsys deviceidle whitelist +com.excp.podroid
-adb -s $S shell pm grant com.excp.podroid android.permission.MANAGE_VIRTUAL_MACHINE      # AVF backend
-adb -s $S shell pm grant com.excp.podroid android.permission.USE_CUSTOM_VIRTUAL_MACHINE  # AVF backend
-# headless phone: no lock screen, stay awake on power, dim panel
-adb -s $S shell locksettings clear --old <pattern-as-digits>   # Nick runs this; needs the current PIN/pattern
-adb -s $S shell locksettings set-disabled true
-adb -s $S shell svc power stayon true
-adb -s $S shell settings put system screen_off_timeout 2147483647
-adb -s $S shell settings put system screen_brightness_mode 0
-adb -s $S shell settings put system screen_brightness 1
+```
+Dokploy (DO box, 100.64.0.7)
+   └── ssh root@<guest tailnet IP>:2222 (OpenSSH, key only)
+         └── Alpine guest under Podroid (AVF on Pixel 7), running tailscaled + dockerd
+               └── single-node swarm + dokploy-network + dokploy-traefik, as Dokploy's setup creates
 ```
 
-Granting a runtime permission restarts the app, so grant before driving the wizard.
-`pm grant` of the two AVF permissions makes the "AVF available" banner disappear. Podroid's docs say
-AVF is Pixel 8+, but the Pixel 7 offered it and the guest runs on it (guest gets DHCP from Android
-tethering on 172.19.72.0/24, not SLIRP's 10.0.2.15).
+- **tailscaled runs inside the guest**, not just the Android app. The guest is an Android *tethered*
+  client (DHCP from Android, `172.19.72.0/24` on this phone), and Android keeps tethered clients
+  outside VPN apps. So the guest cannot see the tailnet through the phone's Tailscale app, and
+  nothing it does triggers the phone to find peers. The Android app stays installed so the phone
+  itself can use an exit node; it is not on the deploy path.
+- **The DO box reaches the guest only on a direct path.** The guest's home relay is `cn` (Aliyun),
+  which the box cannot reach. A direct path forms only after the *guest* sends to the box (the
+  box's own disco goes via `cn` and dies). Hence the per-minute cron keepalive in the guest. On the
+  Wi-Fi used for the spike the guest's packets leave through the router's WireGuard exit in the US;
+  on a China-direct network this must be re-tested before moving phones there.
+- **Dropbear cannot be Dokploy's ssh target.** It closes the connection for exec commands longer
+  than ~10 KB and Dokploy sends its ~20 KB setup script as one command (`Error: Unable to exec` in
+  Dokploy's log, an empty "Initializing Setup Server" deployment log). OpenSSH on 2222 fixes it.
+  Dropbear stays on guest 22 / phone 9922 for Podroid.
+- **Dropbear flips to key-only by itself.** Once `/root/.ssh/authorized_keys` exists, Podroid's
+  hostd runs dropbear with `-s` (no passwords). After that, the only way into the guest is a key:
+  Dokploy's over 2222, or your own key added to `authorized_keys` before the password stops working.
+- **IPv6 off in the guest.** Tethering hands out a global IPv6 address with no working route, and
+  dockerd then fails pulls with `dial tcp [2600:...]`. `/etc/sysctl.d/90-no-ipv6.conf`.
+- **China network facts:** `dl-cdn.alpinelinux.org` unreachable, use `mirrors.aliyun.com`.
+  Docker Hub reachable over IPv4 via this router (401 challenge in ~1 s). `rclone.org` reachable.
 
-## 2. Podroid wizard (driven by `adb shell input tap` from screenshots)
+## Phone preparation (adb, all scriptable)
 
-Settings chosen: Load balance **off** (otherwise storage is forced to 8 GB), storage 32 GB,
-RAM 2 GB, CPU 4 (Podroid's own guidance: 8 is slower than 4 on QEMU), bandwidth Unlimited,
-SSH **on**, Downloads sharing off, USB passthrough off. Permissions page: already granted above,
-tap Get Started. Then start the VM with the documented intent:
+1. Authorize USB debugging once (dialog on the phone).
+2. Remove the screen lock so adb can drive the UI unattended (Nick's call for shelf phones).
+   `locksettings clear --old <PIN or pattern digits 1-9>` must be run by a human; then
+   `locksettings set-disabled true`. Pattern digits: rows top-to-bottom, `1 2 3 / 4 5 6 / 7 8 9`.
+3. `svc power stayon true`, `settings put system screen_off_timeout 2147483647`,
+   `screen_brightness_mode 0`, `screen_brightness 1`.
+4. Phantom-process fix (Podroid docs, verbatim):
+   `device_config set_sync_disabled_for_tests persistent`,
+   `device_config put activity_manager max_phantom_processes 2147483647`,
+   `settings put global settings_enable_monitor_phantom_procs false`.
+5. Install both APKs (`adb install -r`). Package names in `pins/packages`.
+6. Podroid permissions over adb (no GUI needed): `pm grant com.excp.podroid
+   android.permission.POST_NOTIFICATIONS`, `dumpsys deviceidle whitelist +com.excp.podroid`, and
+   for AVF: `pm grant ... MANAGE_VIRTUAL_MACHINE` and `USE_CUSTOM_VIRTUAL_MACHINE`. Granting
+   restarts the app; relaunch it afterwards.
 
-```sh
-adb -s $S shell am start -a com.excp.podroid.action.START_VM
-adb -s $S forward tcp:9922 tcp:9922      # dropbear in the guest, root / podroid on first boot
-```
+## Podroid wizard (GUI, via adb screencap + tap; ~2 minutes)
 
-"Start VM on boot" is in Settings and still has to be switched on by hand (not done yet on this phone).
+Launch `com.excp.podroid`. Tap coordinates are for 1080x2400.
 
-## 3. Guest setup (over `ssh -p 9922 root@127.0.0.1` through the adb forward)
+| Step | Setting | Value used |
+|---|---|---|
+| 1 Storage | size | 32 GB (only selectable after step 2's Load balance is off; go Back) |
+| 2 Configure | Load balance | **off** |
+| 2 | RAM / cores / bandwidth | 2 GB / 4 / Unlimited (Podroid says 8 cores is slower than 4 on QEMU) |
+| 2 | SSH access | on |
+| 3 Downloads sharing | | off |
+| 4 USB passthrough | | off |
+| 5 Permissions | | already granted by adb; tap Get Started |
 
-```sh
-# China: the default Alpine mirror is unreachable
-sed -i 's#https://dl-cdn.alpinelinux.org#https://mirrors.aliyun.com#g' /etc/apk/repositories
-apk update && apk add tailscale openssh-server
-# tailscale as the guest's own node (preauth key from `headscale-cn/commands/hs preauthkeys create --user 1 --expiration 1h`)
-rc-update add tailscale default && rc-service tailscale start
-tailscale up --login-server https://hs.nclar.ke --authkey <key> --hostname pixel-7-podroid --accept-dns=false
-# keepalive: the DO box can only reach the phone once the phone has initiated (see §5)
-( crontab -l; echo '*/1 * * * * /usr/bin/tailscale ping -c 1 --timeout 5s 100.64.0.7 >/dev/null 2>&1' ) | crontab -
-rc-update add crond default && rc-service crond start
-# OpenSSH on 2222 for Dokploy (dropbear drops exec commands > ~10 KB; Dokploy's setup script is 19 KB)
-printf 'Port 2222\nPermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/dokploy.conf
-ssh-keygen -A && rc-update add sshd default && rc-service sshd start
-# keys: Dokploy's pixel_6 public key (dokploy ssh-key all) + the operator's, then dropbear key-only
-mkdir -p /root/.ssh && chmod 700 /root/.ssh && cat >> /root/.ssh/authorized_keys ... && chmod 600 /root/.ssh/authorized_keys
-sed -i 's/^DROPBEAR_OPTS=.*/DROPBEAR_OPTS="-s"/' /etc/conf.d/dropbear && rc-service dropbear restart
-# Dokploy's setup script assumes bash (uses $EUID); root's shell is /bin/sh by default
-sed -i 's#^root:x:0:0:root:/root:/bin/sh#root:x:0:0:root:/root:/bin/bash#' /etc/passwd
-# Podroid forwards (pins/forwards) — only needed for LAN access to guest ports; Dokploy uses the tailnet
-for l in $(cat pins/forwards); do /usr/local/bin/podroid-forward add $l; done
-```
+Then the home screen. Pixel 7 reports **AVF (KVM) available** despite the docs saying Pixel 8+.
+Start the VM with `am start -a com.excp.podroid.action.START_VM`; Ready in ~50 s. Set
+"Start VM on boot" in Settings (not yet scripted; see open items).
 
-## 4. Dokploy (CLI authenticated to `http://100.64.0.7:3000`; several CLI subcommands return 400, the REST API with `x-api-key` works)
+## Guest configuration (over `adb forward tcp:9922 tcp:9922`, password `podroid`)
 
-```sh
-dokploy server create --name pixel-7-podroid --ipAddress 100.64.0.9 --port 2222 --username root \
-  --sshKeyId 46etDVagTkjFQka2nEbhV --serverType deploy --json
-curl -H "x-api-key: $TOK" "$B/server.validate?serverId=$SID"          # docker/swarm/network/dir flags
-curl -X POST -H "x-api-key: $TOK" -d '{"serverId":"'$SID'"}' "$B/server.setup"   # async; poll deployment.allByServer
-curl -X POST ... -d '{"environmentId":"dgynIEdNSk66oVgHVKBdG","serverId":"'$SID'"}' "$B/application.deployNginxQuickstart"
-curl -X POST ... -d '{"applicationId":"'$APP'","publishedPort":30000,"targetPort":80,"protocol":"tcp","publishMode":"host"}' "$B/port.create"
-curl -X POST ... -d '{"applicationId":"'$APP'"}' "$B/application.redeploy"
-curl http://100.64.0.9:30000/      # <title>Hello World</title>
-```
+1. `/etc/apk/repositories`: dl-cdn → mirrors.aliyun.com. `apk add tailscale openssh-server`.
+2. tailscale: `rc-update add tailscale default; rc-service tailscale start;`
+   `tailscale up --login-server https://hs.nclar.ke --authkey <preauth> --hostname <phone>-podroid --accept-dns=false`.
+   Preauth key: `headscale-cn/commands/hs preauthkeys create --user 1 --expiration 1h`.
+3. Keepalive cron (busybox crond): `*/1 * * * * /usr/bin/tailscale ping -c 1 --timeout 5s 100.64.0.7`.
+4. OpenSSH on 2222, key only: `/etc/ssh/sshd_config.d/dokploy.conf` with `Port 2222`,
+   `PermitRootLogin prohibit-password`, `PasswordAuthentication no`; `ssh-keygen -A`;
+   `rc-update add sshd default; rc-service sshd restart`.
+5. Dokploy's public key (ssh key `pixel_6`, id `46etDVagTkjFQka2nEbhV`) into
+   `/root/.ssh/authorized_keys` (700/600).
+6. IPv6 off (sysctl above).
+7. Port forwards (`/usr/local/bin/podroid-forward add <host> <guest> tcp`, not on PATH in a
+   non-login shell) from `pins/forwards`. Not on the Dokploy path any more; kept so published
+   ports are also reachable on the phone's LAN IP.
 
-Setup on Alpine: installs curl/wget/git/jq/rclone, `docker swarm init`, creates `dokploy-network`
-and `/etc/dokploy/*`. The `apk add` step took ~4 minutes on the Aliyun mirror. The Traefik
-container was not created and nixpacks/railpack/buildpacks are absent (GitHub downloads are slow
-from here); neither matters for image-based deploys with published ports.
+## Dokploy
 
-## 5. Networking facts that drove the design
+- `dokploy server create --name <phone>-podroid --ipAddress <guest IP> --port 2222 --username root
+  --sshKeyId 46etDVagTkjFQka2nEbhV --serverType deploy`. Names: hyphens (DNS labels).
+- Validate: `GET /api/server.validate?serverId=…` with `x-api-key` (the CLI's `server validate`
+  returns 400). Setup: `POST /api/server.setup {"serverId"}`; it is async, watch
+  `GET /api/deployment.allByServer?serverId=…` for `running` → `done`. Setup on Alpine installs
+  curl wget git git-lfs jq openssl sudo unzip tar + rclone, inits a single-node swarm, creates
+  `dokploy-network`, `/etc/dokploy/*`, and runs `dokploy-traefik` (ports 80/443 inside the guest).
+- The CLI's `server update` needs `--description`; the REST `server.update` needs every field
+  including `serverType`.
+- Personal project environment id for the smoke test: `dgynIEdNSk66oVgHVKBdG`.
 
-- The AVF guest is an Android tethered client, so it sits **outside** the Tailscale Android app's VPN.
-  Guest traffic to 100.64.x goes nowhere; the Android app cannot serve the guest.
-- From this Wi-Fi, foreign traffic leaves through the router's WireGuard exit in the US
-  (135.180.36.137), so the phone's public endpoint is American and the DO box reaches it directly.
-- The DO box's own discovery goes through the phone's home relay `cn` (Aliyun), which the box cannot
-  reach. A direct path forms **only after the phone/guest sends first**; hence the cron keepalive.
-- Firewall on the DO box: tcp/443 and udp/41641 open to all; the Dokploy panel stays behind its
-  Traefik IP allowlist and is reached over the tailnet at 100.64.0.7:3000.
-- Still to test: the "direct China" Wi-Fi (no WireGuard exit). That decides whether the relay
-  problem needs solving.
+## Result of the spike
+
+Dokploy's nginx quickstart ("Hello World", published host port 30000) deployed to server
+`pixel-7-podroid` from the panel and answered `200` at `http://100.64.0.9:30000/` over the tailnet
+and at `http://<phone LAN IP>:30000/` through the Podroid forward.
 
 ## Open items
 
-- Switch on "Start VM on boot" in Podroid Settings.
-- The Tailscale Android app node `pixel-7` also exists (kept on purpose, for the phone's own access).
-- Traefik on the guest: investigate only if domain routing on phones is wanted.
+- "Start VM on boot" is a Podroid Settings toggle, not yet set over adb.
+- Direct-path test on the China-direct Wi-Fi.
+- The Android-app node (`pixel-7`, 100.64.0.8) and the guest node (`pixel-7-podroid`, 100.64.0.9)
+  are two headscale nodes per phone; fine, but `phone-status` should show both.
