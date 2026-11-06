@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# phone-provision — take one USB-attached Android phone from "developer mode on" to
+# "registered as a Dokploy remote server and validated". Idempotent: every step checks
+# before acting, so re-run after a manual step and it continues.
+#
+# Usage: bin/phone-provision <adb-serial> [--reinstall]
+#   --reinstall   reinstall both APKs even if already present (upgrade path)
+#
+# Manual steps it will stop and ask for: Podroid's first-run wizard (device-specific taps),
+# and removing a screen lock if one is set (needs the PIN/pattern; see docs/runbook.md §1).
+# Needs: adb, ssh, curl, python3, the dokploy CLI logged in, and either
+# ~/.config/pixel_cluster/headscale-api-key or ssh access to the DO box (headscale-cn/commands/hs).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# shellcheck disable=SC1091
+source bin/lib.sh
+
+REINSTALL=0; SERIAL=""
+for a in "$@"; do case "$a" in --reinstall) REINSTALL=1 ;; -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) SERIAL=$a ;; esac; done
+[ -n "$SERIAL" ] || die "usage: bin/phone-provision <adb-serial>"
+adb -s "$SERIAL" get-state >/dev/null 2>&1 || die "adb cannot see $SERIAL (unauthorized or unplugged?)"
+
+HS_URL="https://hs.nclar.ke"; HS_KEYFILE="$HOME/.config/pixel_cluster/headscale-api-key"; HS_CMD="$HOME/repos/headscale-cn/commands/hs"
+DOKPLOY_BOX_IP="100.64.0.7"; DOKPLOY_SSHKEY_ID="46etDVagTkjFQka2nEbhV"; GUEST_SSH_PORT=2222
+MODEL=$(adb -s "$SERIAL" shell getprop ro.product.model | tr -d '\r')
+NAME=$(phone_node_name "$MODEL" "$SERIAL" pins/phones)
+step() { echo "== $*"; log "$*"; }
+
+# 1. APKs ----------------------------------------------------------------------------------
+step "1 apks ($MODEL, node name $NAME)"
+while read -r app pkg <&3; do
+  apk=$(find apks -maxdepth 1 -iname "${app}*.apk" -printf '%f\n' | sort | tail -1); [ -n "$apk" ] || die "no $app APK in apks/ (run bin/apk-fetch)"
+  if [ "$REINSTALL" = 1 ] || [ -z "$(adb_installed_version "$SERIAL" "$pkg")" ]; then
+    if adb -s "$SERIAL" install -r "apks/$apk" >>"$LOG_FILE" 2>&1; then echo "   installed $apk"; else die "adb install $apk failed (see $LOG_FILE)"; fi
+  else echo "   $pkg already installed (versionCode $(adb_installed_version "$SERIAL" "$pkg"))"; fi
+done 3< pins/packages
+
+# 2. Phone settings (all idempotent) -------------------------------------------------------
+step "2 phone settings"
+PODROID_PKG=$(awk '$1=="podroid"{print $2}' pins/packages)
+adb -s "$SERIAL" shell device_config set_sync_disabled_for_tests persistent
+adb -s "$SERIAL" shell device_config put activity_manager max_phantom_processes 2147483647
+adb -s "$SERIAL" shell settings put global settings_enable_monitor_phantom_procs false
+for p in POST_NOTIFICATIONS MANAGE_VIRTUAL_MACHINE USE_CUSTOM_VIRTUAL_MACHINE; do adb -s "$SERIAL" shell pm grant "$PODROID_PKG" "android.permission.$p" 2>>"$LOG_FILE" || true; done
+adb -s "$SERIAL" shell dumpsys deviceidle whitelist "+$PODROID_PKG" >>"$LOG_FILE"
+adb -s "$SERIAL" shell svc power stayon true
+adb -s "$SERIAL" shell settings put system screen_off_timeout 2147483647
+adb -s "$SERIAL" shell settings put system screen_brightness_mode 0
+adb -s "$SERIAL" shell settings put system screen_brightness 1
+if [ "$(adb -s "$SERIAL" shell locksettings get-disabled | tr -d '\r')" != "true" ]; then
+  adb -s "$SERIAL" shell locksettings set-disabled true >>"$LOG_FILE" 2>&1 || true
+  [ "$(adb -s "$SERIAL" shell locksettings get-disabled | tr -d '\r')" = "true" ] || \
+    echo "   NOTE: a PIN/pattern is set; clear it once with: adb -s $SERIAL shell locksettings clear --old <PIN>"
+fi
+echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel"
+
+# 3. VM up and reachable on 9922 through an adb forward -------------------------------------
+step "3 Podroid VM"
+adb -s "$SERIAL" forward tcp:9922 tcp:9922 >/dev/null
+vm_up() { timeout 4 bash -c 'exec 3<>/dev/tcp/127.0.0.1/9922 && head -c 7 <&3' 2>/dev/null | grep -q SSH; }
+if ! vm_up; then
+  adb -s "$SERIAL" shell am start -a com.excp.podroid.action.START_VM >>"$LOG_FILE" 2>&1 || true
+  for _ in $(seq 1 36); do vm_up && break; sleep 5; done
+fi
+if ! vm_up; then
+  cat <<MSG
+   The VM is not answering on 9922. If this is the phone's first run, finish Podroid's wizard on
+   the phone (docs/runbook.md §2: load balance OFF, 32 GB, 2 GB RAM, 4 cores, Unlimited, SSH ON),
+   then switch on Settings > Start VM on boot, start the VM, and re-run this script.
+MSG
+  exit 2
+fi
+echo "   dropbear answering on 9922"
+
+# 4. Guest shell access: operator key, else first-boot password --------------------------------
+SSH_OPTS=(-p 9922 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+ASKPASS=$(mktemp); printf '#!/bin/sh\necho podroid\n' > "$ASKPASS"; chmod +x "$ASKPASS"; trap 'rm -f "$ASKPASS"' EXIT
+gsh() { # run a command in the guest
+  if ssh "${SSH_OPTS[@]}" -o BatchMode=yes root@127.0.0.1 true </dev/null 2>/dev/null; then ssh "${SSH_OPTS[@]}" -o BatchMode=yes root@127.0.0.1 "$@"
+  else SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force ssh "${SSH_OPTS[@]}" -o PreferredAuthentications=password root@127.0.0.1 "$@"; fi
+}
+
+# 5. Guest configuration (one idempotent remote script) --------------------------------------
+step "5 guest packages, sshd:$GUEST_SSH_PORT, keys, cron, forwards"
+DOKPLOY_PUB=$(dk_get sshKey.all | python3 -I -c 'import sys,json; print([k for k in json.load(sys.stdin) if k["sshKeyId"]==sys.argv[1]][0]["publicKey"].strip())' "$DOKPLOY_SSHKEY_ID")
+OPERATOR_PUB=$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub)
+FORWARDS=$(awk '{printf "/usr/local/bin/podroid-forward list | grep -q \"^%s %s %s\" || /usr/local/bin/podroid-forward add %s %s %s\n",$1,$2,$3,$1,$2,$3}' pins/forwards)
+gsh "bash -sx" 2>>"$LOG_FILE" <<GUEST || die "guest configuration failed (see $LOG_FILE)"
+set -e
+grep -q mirrors.aliyun.com /etc/apk/repositories || sed -i 's#https://dl-cdn.alpinelinux.org#https://mirrors.aliyun.com#g' /etc/apk/repositories
+command -v tailscale >/dev/null && command -v sshd >/dev/null || { apk update >/dev/null; apk add tailscale openssh-server >/dev/null; }
+mkdir -p /etc/ssh/sshd_config.d /root/.ssh; chmod 700 /root/.ssh; touch /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys
+grep -qF '$DOKPLOY_PUB' /root/.ssh/authorized_keys || echo '$DOKPLOY_PUB' >> /root/.ssh/authorized_keys
+grep -qF '$OPERATOR_PUB' /root/.ssh/authorized_keys || echo '$OPERATOR_PUB' >> /root/.ssh/authorized_keys
+printf 'Port $GUEST_SSH_PORT\nPermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/dokploy.conf
+grep -q '^Include /etc/ssh/sshd_config.d' /etc/ssh/sshd_config || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
+ssh-keygen -A >/dev/null 2>&1; rc-update -q add sshd default; rc-service -q sshd restart >/dev/null
+sed -i 's#^root:x:0:0:root:/root:/bin/sh#root:x:0:0:root:/root:/bin/bash#' /etc/passwd
+grep -q '^DROPBEAR_OPTS="-s"' /etc/conf.d/dropbear || { sed -i 's/^DROPBEAR_OPTS=.*/DROPBEAR_OPTS="-s"/' /etc/conf.d/dropbear; rc-service -q dropbear restart >/dev/null; }
+rc-update -q add tailscale default; rc-service -q tailscale start >/dev/null 2>&1 || true
+rc-update -q add crond default; rc-service -q crond start >/dev/null 2>&1 || true
+crontab -l 2>/dev/null | grep -q 'tailscale ping' || (crontab -l 2>/dev/null; echo '*/1 * * * * /usr/bin/tailscale ping -c 1 --timeout 5s $DOKPLOY_BOX_IP >/dev/null 2>&1') | crontab -
+$FORWARDS
+echo "   guest configured (\$(tailscale version | head -1), sshd on $GUEST_SSH_PORT, \$(/usr/local/bin/podroid-forward list | wc -l) forwards)"
+GUEST
+
+# 6. Join the tailnet ----------------------------------------------------------------------------
+step "6 tailnet node $NAME"
+if gsh "tailscale status --self 2>/dev/null | grep -q '^100\.'"; then
+  gsh "tailscale set --hostname $NAME"; echo "   already joined"
+else
+  if [ -f "$HS_KEYFILE" ]; then
+    KEY=$(curl -sf -m 30 -X POST -H "Authorization: Bearer $(cat "$HS_KEYFILE")" -H 'Content-Type: application/json' \
+      -d "{\"user\":\"1\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)\"}" \
+      "$HS_URL/api/v1/preauthkey" | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["preAuthKey"]["key"])')
+  else
+    KEY=$("$HS_CMD" preauthkeys create --user 1 --expiration 1h 2>/dev/null | tail -1)
+  fi
+  [ -n "$KEY" ] || die "could not mint a headscale preauth key (no $HS_KEYFILE and hs via ssh failed)"
+  gsh "tailscale up --login-server $HS_URL --authkey '$KEY' --hostname $NAME --accept-dns=false" >>"$LOG_FILE" 2>&1
+  echo "   joined"
+fi
+grep -q "^$SERIAL " pins/phones 2>/dev/null || echo "$SERIAL $NAME" >> pins/phones
+TS_JSON=$(mktemp); trap 'rm -f "$ASKPASS" "$TS_JSON"' EXIT
+IP=""
+for _ in $(seq 1 24); do tailscale status --json > "$TS_JSON" 2>/dev/null; IP=$(node_ip_by_hostname "$TS_JSON" "$NAME" 2>/dev/null) && break; sleep 5; done
+[ -n "$IP" ] || die "node $NAME not visible in tailscale status after 2 minutes"
+gsh "tailscale ping -c 2 --timeout 5s $DOKPLOY_BOX_IP" >>"$LOG_FILE" 2>&1 || true   # make the guest initiate so the box gets a direct path
+echo "   $NAME is $IP"
+
+# 7. Dokploy server record, validate, setup -----------------------------------------------------
+step "7 dokploy server"
+SERVERS=$(mktemp); dk_get server.all > "$SERVERS"
+SID=$(find_server_id "$SERVERS" "$NAME"); rm -f "$SERVERS"
+if [ -z "$SID" ]; then
+  SID=$(dk_post server.create "{\"name\":\"$NAME\",\"description\":\"$MODEL $SERIAL Podroid guest\",\"ipAddress\":\"$IP\",\"port\":$GUEST_SSH_PORT,\"username\":\"root\",\"sshKeyId\":\"$DOKPLOY_SSHKEY_ID\",\"serverType\":\"deploy\"}" | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["serverId"])')
+  echo "   created server $SID"
+else echo "   server exists: $SID"; fi
+V=$(dk_get "server.validate?serverId=$SID") || die "dokploy cannot ssh to $IP:$GUEST_SSH_PORT (validate failed)"
+if ! echo "$V" | grep -q '"isMainDirectoryInstalled":true'; then
+  echo "   running dokploy setup (apk on the China mirror takes minutes)"
+  dk_post server.setup "{\"serverId\":\"$SID\"}" >/dev/null || true
+  for _ in $(seq 1 90); do sleep 10; dk_get "server.validate?serverId=$SID" | grep -q '"isMainDirectoryInstalled":true' && break; done
+  V=$(dk_get "server.validate?serverId=$SID"); echo "$V" | grep -q '"isMainDirectoryInstalled":true' || die "dokploy setup did not complete; check the server's deployments in Dokploy"
+fi
+echo "$NAME $IP $SID validated"
+echo "log: $LOG_FILE"

@@ -1,0 +1,82 @@
+[
+  {
+    "serverId": "3RzoxeV75giJGcgX3ueCM",
+    "name": "pixel-7-podroid",
+    "description": "Pixel 7 28161FDH200LY1 Podroid guest",
+    "ipAddress": "100.64.0.9",
+    "port": 2222,
+    "username": "root",
+    "appName": "server-override-primary-microchip-3wuq16",
+    "enableDockerCleanup": true,
+    "buildsConcurrency": 1,
+    "createdAt": "2026-11-06T06:28:51.103Z",
+    "organizationId": "_AZr25tpaL2wHOyvobrfl",
+    "serverStatus": "active",
+    "serverType": "deploy",
+    "command": "",
+    "sshKeyId": "46etDVagTkjFQka2nEbhV",
+    "metricsConfig": {
+      "server": {
+        "port": 4500,
+        "type": "Remote",
+        "token": "",
+        "cronJob": "",
+        "thresholds": {
+          "cpu": 0,
+          "memory": 0
+        },
+        "refreshRate": 60,
+        "urlCallback": "",
+        "retentionDays": 2
+      },
+      "containers": {
+        "services": {
+          "exclude": [],
+          "include": []
+        },
+        "refreshRate": 60
+      }
+    },
+    "totalSum": 1
+  },
+  {
+    "serverId": "t8t34_m-LFqa86faZXRDG",
+    "name": "Pixel 6",
+    "description": "100.64.0.6",
+    "ipAddress": "100.64.0.6",
+    "port": 9922,
+    "username": "root",
+    "appName": "server-calculate-digital-system-p8rpee",
+    "enableDockerCleanup": true,
+    "buildsConcurrency": 1,
+    "createdAt": "2026-10-23T15:07:05.590Z",
+    "organizationId": "_AZr25tpaL2wHOyvobrfl",
+    "serverStatus": "active",
+    "serverType": "deploy",
+    "command": "",
+    "sshKeyId": "46etDVagTkjFQka2nEbhV",
+    "metricsConfig": {
+      "server": {
+        "port": 4500,
+        "type": "Remote",
+        "token": "",
+        "cronJob": "",
+        "thresholds": {
+          "cpu": 0,
+          "memory": 0
+        },
+        "refreshRate": 60,
+        "urlCallback": "",
+        "retentionDays": 2
+      },
+      "containers": {
+        "services": {
+          "exclude": [],
+          "include": []
+        },
+        "refreshRate": 60
+      }
+    },
+    "totalSum": 0
+  }
+]
