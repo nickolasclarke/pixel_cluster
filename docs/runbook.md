@@ -147,3 +147,19 @@ largest RAM Podroid offers (it keeps ~3 GB for Android, which is what stops Andr
 and the largest disk that still leaves Android about 10 GB (64 GB on a 128 GB phone). Set Battery >
 Charging optimization to the 80 % limit; these sit on power permanently and all-core load throttles
 thermally. RAM and CPU changes need a VM stop; pick them in the wizard on a fresh phone.
+
+## Pixel 7 rebuilt from a factory reset (2026-11-06)
+
+User files were pulled first (`adb pull` of Pictures, DCIM, Download, Movies, Snapseed, Documents,
+Music, Android/media: 9.2 GB, 5648 files, counts verified) to `~/phone-backups/`. App data cannot be
+exported without root. After the reset: skip every sign-in, enable USB debugging, then
+`bin/phone-provision` (stops at the wizard), the wizard with the sizing policy (64 GB / 4 GB / 8 cores /
+Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settings > Start VM on boot,
+`bin/phone-debloat`, `bin/phone-provision` again. Learned:
+
+- A wiped guest never logs out, so headscale keeps its node "online". The provisioner now pings the
+  old address from the laptop and retires the node when it does not answer; the Android-app node was
+  retired by hand the same way (DELETE /api/v1/node/<id>). The Dokploy record's IP was updated by the
+  script (100.64.0.9 -> 100.64.0.11).
+- `bin/phone-debloat` disabled 64 packages with nothing refused. The launcher, Settings and Podroid
+  kept working. Memory numbers before/after are in the session summary below the table.

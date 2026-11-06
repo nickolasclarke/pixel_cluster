@@ -121,7 +121,15 @@ else
   if [ -f "$HS_KEYFILE" ]; then
     # a rebuilt guest (factory reset, Podroid reset) must not leave the old node behind as pixel-x-podroid-1
     NODES=$(mktemp); curl -sf -m 30 -H "Authorization: Bearer $(cat "$HS_KEYFILE")" "$HS_URL/api/v1/node" > "$NODES" || die "cannot list headscale nodes"
-    STALE=$(stale_node_id "$NODES" "$NAME") || die "headscale already has a live node named $NAME"
+    if ! STALE=$(stale_node_id "$NODES" "$NAME" 2>/dev/null); then
+      # headscale still says online: a wiped guest never logs out. Settle it with a real ping from this laptop.
+      OLD_IP=$(node_ip_by_hostname <(tailscale status --json) "$NAME" 2>/dev/null || true)
+      if [ -n "$OLD_IP" ] && tailscale ping -c 1 --timeout 5s "$OLD_IP" >/dev/null 2>&1; then
+        die "headscale already has a live, reachable node named $NAME ($OLD_IP)"
+      fi
+      STALE=$(python3 -I -c 'import json,sys; print([n["id"] for n in json.load(open(sys.argv[1]))["nodes"] if n.get("givenName")==sys.argv[2]][0])' "$NODES" "$NAME")
+      echo "   node $NAME is marked online but does not answer; treating it as stale"
+    fi
     rm -f "$NODES"
     if [ -n "$STALE" ]; then
       curl -sf -m 30 -X DELETE -H "Authorization: Bearer $(cat "$HS_KEYFILE")" "$HS_URL/api/v1/node/$STALE" >/dev/null || die "could not delete stale node $NAME (id $STALE)"
