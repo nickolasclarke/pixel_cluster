@@ -24,9 +24,9 @@ rm -rf "$tmp"
 assert_eq "33" "$(parse_version_code "$(grep -m1 versionCode=33 tests/fixtures/pm-dump.txt)")" "parse_version_code"
 assert_eq "" "$(parse_version_code "")" "parse_version_code empty when not installed"
 
-assert_eq "pixel-7-podroid" "$(phone_node_name "Pixel 7" 28161FDH200LY1 pins/phones)" "node name: known serial keeps its name"
-assert_eq "pixel-7-podroid-ABCD" "$(phone_node_name "Pixel 7" ZZZZZZZZZZZABCD pins/phones)" "node name: second Pixel 7 gets serial suffix"
-assert_eq "pixel-6-pro-podroid" "$(phone_node_name "Pixel 6 Pro" 1234567890ABCDEF pins/phones)" "node name: new model, no collision"
+assert_eq "pixel-7-podroid" "$(phone_node_name "Pixel 7" 28161FDH200LY1 tests/fixtures/phones)" "node name: known serial keeps its name"
+assert_eq "pixel-7-podroid-ABCD" "$(phone_node_name "Pixel 7" ZZZZZZZZZZZABCD tests/fixtures/phones)" "node name: second Pixel 7 gets serial suffix"
+assert_eq "pixel-6-pro-podroid" "$(phone_node_name "Pixel 6 Pro" 1234567890ABCDEF tests/fixtures/phones)" "node name: new model, no collision"
 
 assert_eq "100.64.0.9" "$(node_ip_by_hostname tests/fixtures/ts-status.json pixel-7-podroid)" "node ip by hostname"
 assert_fails "node ip unknown hostname exits 1" node_ip_by_hostname tests/fixtures/ts-status.json no-such-node
