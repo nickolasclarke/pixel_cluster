@@ -61,3 +61,8 @@ assert_fails "stale_node_id: online node of that name exits 1" stale_node_id tes
 
 # --- phone-debloat ---
 assert_eq "com.android.vending com.google.android.youtube" "$(packages_to_disable tests/fixtures/pm-enabled.txt pins/disable-packages | sort | tr '\n' ' ' | sed 's/ $//')" "packages_to_disable: listed AND currently enabled, comments ignored"
+
+# --- charging limit ---
+assert_eq "80%" "$(charge_limit_label 1)" "charge_limit_label: mode 1 is the 80% cap"
+assert_eq "full" "$(charge_limit_label 0)" "charge_limit_label: mode 0 charges to full"
+assert_eq "full" "$(charge_limit_label null)" "charge_limit_label: unset charges to full"

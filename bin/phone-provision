@@ -55,7 +55,10 @@ if [ "$(adb -s "$ADB_TARGET" shell locksettings get-disabled | tr -d '\r')" != "
   [ "$(adb -s "$ADB_TARGET" shell locksettings get-disabled | tr -d '\r')" = "true" ] || \
     echo "   NOTE: a PIN/pattern is set; clear it once with: adb -s $SERIAL shell locksettings clear --old <PIN>"
 fi
-echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel"
+# charge to 80 % only: the phone lives on power (Battery > Battery health > Charging optimization)
+adb -s "$ADB_TARGET" shell settings put secure charge_optimization_mode 1
+adb -s "$ADB_TARGET" shell settings put secure adaptive_charging_enabled 0
+echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel, charge limit 80%"
 DEBLOAT_OUT=$(bin/phone-debloat "$ADB_TARGET") || die "phone-debloat failed (see $LOG_FILE)"
 echo "   debloat: ${DEBLOAT_OUT%%$'\n'*}"
 

@@ -24,9 +24,10 @@ for target in $(adb devices | awk 'NR>1 && $2=="device" {print $1}'); do
     line="$line $app:${inst:-none}/$pin"
     [ "$(version_matches_pin "${inst:-none}" "$pin")" = yes ] || rc=1
   done 3< pins/packages
+  charge=$(charge_limit_label "$(adb -s "$target" shell settings get secure charge_optimization_mode | tr -d '\r')"); [ "$charge" = "80%" ] || rc=1
   node=$(node_state "$TS_JSON" "$name"); [ "$node" = online ] || rc=1
   sid=$(find_server_id "$SERVERS" "$name")
   if [ -n "$sid" ]; then dk=$(python3 -I -c 'import sys,json; print([s for s in json.load(open(sys.argv[1])) if s["serverId"]==sys.argv[2]][0].get("serverStatus"))' "$SERVERS" "$sid"); else dk=none; rc=1; fi
-  echo "$line node:$node dokploy:$dk"
+  echo "$line charge:$charge node:$node dokploy:$dk"
 done
 exit $rc

@@ -149,3 +149,8 @@ packages_to_disable() { # <pm-list-packages-e output file> <disable-list file> �
 adb_real_serial() { # <adb -s target> → ro.serialno
   adb -s "$1" shell getprop ro.serialno 2>/dev/null | tr -d '\r'
 }
+
+# --- charging limit (Pixel "Charging optimization": secure charge_optimization_mode 1 = Limit to 80%)
+charge_limit_label() { # <charge_optimization_mode value> → 80%|full
+  [ "$1" = 1 ] && echo "80%" || echo full
+}
