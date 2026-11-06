@@ -182,3 +182,13 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
 - `dokploy-traefik` exits at boot ("network ... not found": the swarm overlay is not up yet) and
   Docker's restart loop gives up. `/etc/local.d/dokploy-traefik.start` now re-starts it 45 s after
   boot; the provisioner installs it.
+
+## Control without USB (2026-11-06)
+
+- Guests: `ssh -p 2222 root@<guest tailnet IP>` from anywhere on the tailnet (operator key is installed).
+- Android: `adb tcpip 5555` once over USB (Nick runs it; it exposes a service), then
+  `adb connect <phone LAN IP>:5555`. The scripts accept `host:port` wherever they take a serial and
+  key names/pins on the real serial. Lost on reboot without root. Reaching ADB from outside the LAN
+  needs the Tailscale Android app logged in on the phone (not done on either phone yet).
+- Tailscale SSH: skipped; OpenSSH with keys over the tailnet already covers it and the policy
+  allows non-root users only.

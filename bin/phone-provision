@@ -56,7 +56,8 @@ if [ "$(adb -s "$ADB_TARGET" shell locksettings get-disabled | tr -d '\r')" != "
     echo "   NOTE: a PIN/pattern is set; clear it once with: adb -s $SERIAL shell locksettings clear --old <PIN>"
 fi
 echo "   phantom-process fix, Podroid permissions, stay-awake, dim panel"
-bin/phone-debloat "$ADB_TARGET" | head -1 | sed "s/^/   debloat: /"
+DEBLOAT_OUT=$(bin/phone-debloat "$ADB_TARGET") || die "phone-debloat failed (see $LOG_FILE)"
+echo "   debloat: ${DEBLOAT_OUT%%$'\n'*}"
 
 # 3. VM up and reachable on 9922 through an adb forward -------------------------------------
 step "3 Podroid VM"
