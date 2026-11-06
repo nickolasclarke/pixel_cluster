@@ -173,3 +173,12 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
 - `bin/phone-debloat` now runs from `bin/phone-provision` step 2, and the list includes Play services
   and the keyboard. Pixel 7 after: 4.7 GB available with the 4 GB VM running; Pixel 6 Pro: 6.6 GB.
   Launcher, Settings, Podroid and the Tailscale app still work; adb text injection needs no IME.
+
+## Reboot behaviour (tested on the Pixel 7, 2026-11-06)
+
+- Android back on USB in ~55 s; the VM auto-starts and the guest is on the tailnet ~10 s later.
+- `adb tcpip 5555` does not survive a reboot (expected without root). Android's Wireless debugging is
+  the candidate for a reboot-proof path; untested.
+- `dokploy-traefik` exits at boot ("network ... not found": the swarm overlay is not up yet) and
+  Docker's restart loop gives up. `/etc/local.d/dokploy-traefik.start` now re-starts it 45 s after
+  boot; the provisioner installs it.

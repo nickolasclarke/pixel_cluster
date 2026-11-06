@@ -120,6 +120,11 @@ command_background=yes
 pidfile="/run/tailnet-keepalive.pid"
 depend() { need tailscale; }
 RC
+# Dokploy's traefik container dies at boot before the swarm overlay network exists and docker gives up
+# on it; start it again once the daemon has settled.
+mkdir -p /etc/local.d
+printf '#!/bin/sh\n( sleep 45; docker start dokploy-traefik >/dev/null 2>&1 ) &\n' > /etc/local.d/dokploy-traefik.start
+chmod +x /etc/local.d/dokploy-traefik.start; rc-update -q add local default
 chmod +x /etc/init.d/tailnet-keepalive; rc-update -q add tailnet-keepalive default; rc-service -q tailnet-keepalive restart >/dev/null 2>&1 || rc-service -q tailnet-keepalive start >/dev/null 2>&1
 $FORWARDS
 echo "   guest configured (\$(tailscale version | head -1), sshd on $GUEST_SSH_PORT, \$(/usr/local/bin/podroid-forward list | wc -l) forwards)"
