@@ -119,9 +119,8 @@ sed -i 's#^root:x:0:0:root:/root:/bin/sh#root:x:0:0:root:/root:/bin/bash#' /etc/
 # classic overlay2 image store: containerd's snapshotter unpacks hard-linked files as empty here
 mkdir -p /etc/docker
 if [ "\$(cat /etc/docker/daemon.json 2>/dev/null)" != '$DAEMON_JSON' ]; then
+  # images and containers of the old store are gone; step 7 re-runs Dokploy setup when traefik is missing
   echo '$DAEMON_JSON' > /etc/docker/daemon.json; rc-service -q docker restart >/dev/null 2>&1
-  # images from the old store are gone; Dokploy's traefik container needs its image back
-  docker start dokploy-traefik >/dev/null 2>&1 || { IMG=\$(docker inspect -f '{{.Config.Image}}' dokploy-traefik 2>/dev/null) && docker pull -q "\$IMG" >/dev/null && docker start dokploy-traefik >/dev/null; } || true
 fi
 # tethering hands the guest a global IPv6 address with no route; dockerd then fails pulls over v6
 if [ ! -f /etc/sysctl.d/90-no-ipv6.conf ]; then
@@ -213,11 +212,11 @@ else
   fi
 fi
 V=$(dk_get "server.validate?serverId=$SID") || die "dokploy cannot ssh to $IP:$GUEST_SSH_PORT (validate failed)"
-if ! echo "$V" | grep -q '"isMainDirectoryInstalled":true'; then
+if ! dokploy_server_ready "$V"; then
   echo "   running dokploy setup (apk on the China mirror takes minutes)"
   dk_post server.setup "{\"serverId\":\"$SID\"}" >/dev/null || true
-  for _ in $(seq 1 90); do sleep 10; dk_get "server.validate?serverId=$SID" | grep -q '"isMainDirectoryInstalled":true' && break; done
-  V=$(dk_get "server.validate?serverId=$SID"); echo "$V" | grep -q '"isMainDirectoryInstalled":true' || die "dokploy setup did not complete; check the server's deployments in Dokploy"
+  for _ in $(seq 1 90); do sleep 10; dokploy_server_ready "$(dk_get "server.validate?serverId=$SID")" && break; done
+  dokploy_server_ready "$(dk_get "server.validate?serverId=$SID")" || die "dokploy setup did not complete; check the server's deployments in Dokploy"
 fi
 echo "$NAME $IP $SID validated"
 echo "log: $LOG_FILE"

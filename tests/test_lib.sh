@@ -71,3 +71,9 @@ assert_eq "full" "$(charge_limit_label null)" "charge_limit_label: unset charges
 assert_eq '{"features": {"containerd-snapshotter": false}}' "$(docker_daemon_json_overlay2 '')" "daemon.json created when absent"
 assert_eq '{"log-driver": "json-file", "features": {"containerd-snapshotter": false}}' "$(docker_daemon_json_overlay2 '{"log-driver":"json-file"}')" "daemon.json keeps existing top-level keys"
 assert_eq '{"features": {"buildkit": true, "containerd-snapshotter": false}}' "$(docker_daemon_json_overlay2 '{"features":{"buildkit":true,"containerd-snapshotter":true}}')" "daemon.json keeps other features and overrides the snapshotter"
+
+# dokploy_server_ready: validate output must show the main directory and a running traefik
+assert_eq "0" "$(dokploy_server_ready '{"traefik":{"version":"3.6.25","enabled":true},"isMainDirectoryInstalled":true}'; echo $?)" "server ready with traefik up"
+assert_eq "1" "$(dokploy_server_ready '{"traefik":{"version":"0.0.0","enabled":false},"isMainDirectoryInstalled":true}'; echo $?)" "server not ready without traefik"
+assert_eq "1" "$(dokploy_server_ready '{"traefik":{"version":"3.6.25","enabled":true},"isMainDirectoryInstalled":false}'; echo $?)" "server not ready without main directory"
+assert_eq "1" "$(dokploy_server_ready ''; echo $?)" "server not ready on empty validate output"

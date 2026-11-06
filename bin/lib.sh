@@ -164,3 +164,7 @@ d = json.loads(sys.argv[1]) if sys.argv[1].strip() else {}
 d.setdefault("features", {})["containerd-snapshotter"] = False
 print(json.dumps(d))' "$1"
 }
+
+dokploy_server_ready() { # <server.validate JSON> -> 0 when Dokploy's main directory and traefik are both up
+  echo "$1" | grep -q '"isMainDirectoryInstalled":true' && echo "$1" | grep -q '"traefik":{"version":"[0-9.]*","enabled":true}'
+}
