@@ -53,3 +53,8 @@ PY
 assert_eq "100.64.0.9" "$(node_ip_by_hostname tests/fixtures/ts-status-dup.json pixel-7-podroid)" "node ip: DNS label wins over a stale duplicate HostName"
 assert_eq "100.64.0.42" "$(node_ip_by_hostname tests/fixtures/ts-status-dup.json pixel-7-podroid-1)" "node ip: suffixed label is addressable"
 assert_eq "none" "$(node_state tests/fixtures/ts-status-dup.json pixel-7-podroid-2)" "node_state: HostName alone does not match"
+
+# --- stale headscale node before re-join ---
+assert_eq "9" "$(stale_node_id tests/fixtures/hs-nodes.json pixel-7-podroid)" "stale_node_id: offline node of that name"
+assert_eq "" "$(stale_node_id tests/fixtures/hs-nodes.json pixel-9-podroid)" "stale_node_id: no node is empty"
+assert_fails "stale_node_id: online node of that name exits 1" stale_node_id tests/fixtures/hs-nodes.json pixel-6-pro-podroid

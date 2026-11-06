@@ -126,3 +126,14 @@ for p in list(s.get("Peer", {}).values()) + [s.get("Self", {})]:
 print("none")
 PY
 }
+
+# --- headscale REST (API key file; used to retire a stale node before a rebuilt guest re-joins) ---
+stale_node_id() { # <headscale-nodes-json> <givenName> → node id if that node exists and is offline; empty if none; exit 1 if online
+  python3 -I - "$1" "$2" <<'PY'
+import json, sys
+for n in json.load(open(sys.argv[1]))["nodes"]:
+    if n.get("givenName") == sys.argv[2]:
+        if n.get("online"): sys.exit(f"node {sys.argv[2]} (id {n['id']}) is online: another guest has this name")
+        print(n["id"]); break
+PY
+}

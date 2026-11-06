@@ -118,6 +118,14 @@ if gsh "tailscale status --self 2>/dev/null | grep -q '^100\.'"; then
   gsh "tailscale set --hostname $NAME"; echo "   already joined"
 else
   if [ -f "$HS_KEYFILE" ]; then
+    # a rebuilt guest (factory reset, Podroid reset) must not leave the old node behind as pixel-x-podroid-1
+    NODES=$(mktemp); curl -sf -m 30 -H "Authorization: Bearer $(cat "$HS_KEYFILE")" "$HS_URL/api/v1/node" > "$NODES" || die "cannot list headscale nodes"
+    STALE=$(stale_node_id "$NODES" "$NAME") || die "headscale already has a live node named $NAME"
+    rm -f "$NODES"
+    if [ -n "$STALE" ]; then
+      curl -sf -m 30 -X DELETE -H "Authorization: Bearer $(cat "$HS_KEYFILE")" "$HS_URL/api/v1/node/$STALE" >/dev/null || die "could not delete stale node $NAME (id $STALE)"
+      echo "   retired stale headscale node $NAME (id $STALE)"
+    fi
     KEY=$(curl -sf -m 30 -X POST -H "Authorization: Bearer $(cat "$HS_KEYFILE")" -H 'Content-Type: application/json' \
       -d "{\"user\":\"$HS_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)\"}" \
       "$HS_URL/api/v1/preauthkey" | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["preAuthKey"]["key"])')
