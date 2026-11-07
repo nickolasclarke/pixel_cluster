@@ -1,3 +1,4 @@
+# shellcheck shell=bash disable=SC2016  # stub bodies are single-quoted on purpose: they expand inside the stub
 # podroid-watchdog (runs on the phone as adb's shell user): probes the VM's ssh banner on the phone's
 # 127.0.0.1:9922 and fires Podroid's START_VM after WATCHDOG_FAILS consecutive misses, unless the
 # pause file exists. nc, am and sleep are stubbed on PATH; am logs its calls.

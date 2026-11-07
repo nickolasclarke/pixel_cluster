@@ -25,7 +25,7 @@ ADB_TARGET=$SERIAL; SERIAL=$(adb_real_serial "$ADB_TARGET"); [ -n "$SERIAL" ] ||
 
 HS_USER_ID=1   # headscale user "nick"
 HS_URL="https://hs.nclar.ke"; HS_KEYFILE="$HOME/.config/pixel_cluster/headscale-api-key"; HS_CMD="$HOME/repos/headscale-cn/commands/hs"
-DOKPLOY_BOX_IP="100.64.0.7"; DOKPLOY_SSHKEY_ID="46etDVagTkjFQka2nEbhV"; GUEST_SSH_PORT=2222
+DOKPLOY_SSHKEY_ID="46etDVagTkjFQka2nEbhV"
 MODEL=$(adb -s "$ADB_TARGET" shell getprop ro.product.model | tr -d '\r')
 NAME=$(phone_node_name "$MODEL" "$SERIAL" pins/phones)
 step() { echo "== $*"; log "$*"; }

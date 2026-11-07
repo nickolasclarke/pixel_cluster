@@ -92,7 +92,10 @@ PY
 }
 
 # --- Dokploy REST (the CLI's own token; several CLI subcommands return 400) ---
-DOKPLOY_URL="${DOKPLOY_URL:-http://100.64.0.7:3000}"
+DOKPLOY_BOX_IP="100.64.0.7"   # the Dokploy box's tailnet address
+# shellcheck disable=SC2034  # used by the scripts that source this file
+GUEST_SSH_PORT=2222           # guest sshd that Dokploy deploys over
+DOKPLOY_URL="${DOKPLOY_URL:-http://$DOKPLOY_BOX_IP:3000}"
 dokploy_token() { # DOKPLOY_TOKEN env, else the token the dokploy CLI saved next to its own dist/
   if [ -n "${DOKPLOY_TOKEN:-}" ]; then echo "$DOKPLOY_TOKEN"; return; fi
   local cfg; cfg="$(dirname "$(readlink -f "$(command -v dokploy)")")/../config.json"
@@ -182,4 +185,15 @@ print(json.dumps(d))' "$1"
 
 dokploy_server_ready() { # <server.validate JSON> -> 0 when Dokploy's main directory and traefik are both up
   echo "$1" | grep -q '"isMainDirectoryInstalled":true' && echo "$1" | grep -q '"traefik":{"version":"[0-9.]*","enabled":true}'
+}
+
+# --- phone-soak probe parsers ---
+ts_ping_result() { # <tailscale ping output> → "<ms> direct|derp", or "- timeout" when no pong came back
+  # (tailscale ping exits 1 on a relayed pong too, so the text is the only reliable signal)
+  printf '%s\n' "$1" | awk '/^pong from/ { for (i = 1; i <= NF; i++) if ($i == "in") ms = $(i + 1)
+      sub(/ms$/, "", ms); printf "%.0f %s\n", ms, ($0 ~ / via DERP\(/ ? "derp" : "direct"); found = 1; exit }
+    END { if (!found) print "- timeout" }'
+}
+ping_avg_ms() { # <iputils ping output> → average rtt rounded to ms, or "-" when every packet was lost
+  printf '%s\n' "$1" | awk -F/ '/^rtt / { printf "%.0f\n", $5; found = 1 } END { if (!found) print "-" }'
 }

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# phone-soak — unattended stability soak of every phone in pins/phones. Every SOAK_INTERVAL seconds
+# (default 300) it appends one tab-separated line per phone: laptop network up, screen state, LAN
+# ping, Android and guest tailnet pings, guest uptime / tailscaled pid / memory / load, the guest's
+# own path to the Dokploy box, the podroid-watchdog, and Dokploy's server.validate.
+# Light by design (a few pings, one adb shell, one ssh, one validate per phone): no transfers.
+#
+# Usage: bin/phone-soak run [soak-file]       loop until killed
+#        bin/phone-soak summary [soak-file]   per-phone summary of the file
+# soak-file defaults to ~/.local/state/pixel_cluster/soak.tsv
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 1
+# shellcheck disable=SC1091
+source bin/lib.sh
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; }
+CMD=${1:-}; FILE=${2:-$HOME/.local/state/pixel_cluster/soak.tsv}
+INTERVAL=${SOAK_INTERVAL:-300}
+WD=/data/local/tmp/podroid-watchdog
+COLUMNS_TSV="time phone laptop_gw screen lan_ms android_ms android_path guest_ms guest_path ssh uptime_s tailscaled_pid guest_mem_mb load1 box_ms box_path android_mem_mb watchdog wd_restarts dokploy"
+SSHO=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+
+field() { # <key> <key=value lines> → value, or "-"
+  local v; v=$(printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1); echo "${v:--}"
+}
+
+probe_phone() { # <guest node name> <tailscale status json> <dokploy servers json> <laptop_gw> → one TSV line
+  local name=$1 ts=$2 servers=$3 gw=$4 android aip gip target ph g lan sid v dk a_ms a_path g_ms g_path b_ms b_path
+  android=${name%-podroid}
+  aip=$(node_ip_by_hostname "$ts" "$android" 2>/dev/null); gip=$(node_ip_by_hostname "$ts" "$name" 2>/dev/null)
+  target="$aip:5555"
+  adb devices | grep -q "^${target}[[:space:]]*device" || timeout 10 adb connect "$target" >/dev/null 2>&1
+  ph=$(timeout 15 adb -s "$target" shell "echo lan=\$(ip -4 -o addr show wlan0 | awk '{print \$4}' | cut -d/ -f1)
+    echo screen=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
+    echo mem=\$(( \$(grep MemAvailable /proc/meminfo | awk '{print \$2}') / 1024 ))
+    n=\$(grep -c START_VM $WD.log 2>/dev/null); echo wd_restarts=\${n:-0}
+    kill -0 \$(cat $WD.pid 2>/dev/null) 2>/dev/null && echo wd=alive || echo wd=dead" 2>/dev/null | tr -d '\r')
+  [ -n "$(field lan "$ph")" ] && [ "$(field lan "$ph")" != - ] && LAN_IP[$name]=$(field lan "$ph")
+  lan=-; [ -n "${LAN_IP[$name]:-}" ] && lan=$(ping_avg_ms "$(ping -c 3 -i 0.5 -W 3 "${LAN_IP[$name]}" 2>/dev/null)")
+  g=$(timeout 25 ssh "${SSHO[@]}" -p "$GUEST_SSH_PORT" "root@$gip" "echo ssh=ok
+    echo uptime=\$(cut -d. -f1 /proc/uptime)
+    echo tsd=\$(pidof tailscaled)
+    echo mem=\$(( \$(grep MemAvailable /proc/meminfo | awk '{print \$2}') / 1024 ))
+    echo load=\$(cut -d' ' -f1 /proc/loadavg)
+    tailscale ping -c 1 --timeout 5s $DOKPLOY_BOX_IP 2>&1" 2>/dev/null)
+  sid=$(find_server_id "$servers" "$name")
+  # validate makes the Dokploy box ssh into the guest; error = the call itself failed (curl -f / timeout)
+  if [ -z "$sid" ]; then dk=noserver
+  elif ! v=$(dk_get "server.validate?serverId=$sid"); then dk=error
+  elif dokploy_server_ready "$v"; then dk=ready; else dk=notready; fi
+  read -r a_ms a_path <<< "$(ts_ping_result "$(timeout 10 tailscale ping -c 1 --timeout 5s "$aip" 2>&1)")"
+  read -r g_ms g_path <<< "$(ts_ping_result "$(timeout 10 tailscale ping -c 1 --timeout 5s "$gip" 2>&1)")"
+  read -r b_ms b_path <<< "$(ts_ping_result "$g")"
+  printf '%s\t' "$(date +%FT%T)" "$name" "$gw" "$(field screen "$ph")" "$lan" "$a_ms" "$a_path" "$g_ms" "$g_path" \
+    "$( [ "$(field ssh "$g")" = ok ] && echo ok || echo fail)" "$(field uptime "$g")" "$(field tsd "$g")" \
+    "$(field mem "$g")" "$(field load "$g")" "$b_ms" "$b_path" \
+    "$(field mem "$ph")" "$( [ -n "$ph" ] && field wd "$ph" || echo -)" "$(field wd_restarts "$ph")"
+  echo "$dk"
+}
+
+run() {
+  mkdir -p "$(dirname "$FILE")"
+  [ -s "$FILE" ] || echo "$COLUMNS_TSV" | tr ' ' '\t' > "$FILE"
+  declare -gA LAN_IP=()
+  local tsj srv gw name
+  tsj=$(mktemp); srv=$(mktemp); trap 'rm -f "$tsj" "$srv"' EXIT
+  while :; do
+    gw=down; ping -c 1 -W 3 "$(ip route show default | awk '{print $3; exit}')" >/dev/null 2>&1 && gw=ok
+    tailscale status --json > "$tsj" 2>/dev/null || echo '{}' > "$tsj"
+    dk_get server.all > "$srv" 2>/dev/null || echo '[]' > "$srv"
+    while read -r _ name <&3; do
+      [ -n "$name" ] && probe_phone "$name" "$tsj" "$srv" "$gw" >> "$FILE"
+    done 3< pins/phones
+    sleep "$INTERVAL"
+  done
+}
+
+summary() {
+  [ -s "$FILE" ] || die "no soak file at $FILE"
+  python3 -I - "$FILE" <<'PY'
+import csv, sys
+from datetime import datetime
+from statistics import median_low
+rows = list(csv.DictReader(open(sys.argv[1]), delimiter="\t"))
+def num(v):
+    try: return float(v)
+    except ValueError: return None
+for phone in dict.fromkeys(r["phone"] for r in rows):
+    rs = [r for r in rows if r["phone"] == phone]
+    on = [r for r in rs if r["laptop_gw"] == "ok"]
+    times = [datetime.fromisoformat(r["time"]) for r in rs]
+    gap = max([(b - a).total_seconds() for a, b in zip(times, times[1:])] or [0])
+    print(f"{phone}: rounds {len(rs)} (laptop offline {len(rs) - len(on)}), {rs[0]['time']} to {rs[-1]['time']}, max gap {gap / 60:.0f}m")
+    n = len(on)
+    cnt = lambda pred: sum(1 for r in on if pred(r))
+    print(f"  guest ssh {cnt(lambda r: r['ssh'] == 'ok')}/{n}, android pong {cnt(lambda r: r['android_path'] != 'timeout')}/{n}, "
+          f"dokploy ready {cnt(lambda r: r['dokploy'] == 'ready')}/{n}")
+    print(f"  guest->box direct {cnt(lambda r: r['box_path'] == 'direct')}/{n}, relayed {cnt(lambda r: r['box_path'] == 'derp')}, "
+          f"timeout {cnt(lambda r: r['box_path'] == 'timeout')}")
+    def lat(rows_):
+        v = [num(r["lan_ms"]) for r in rows_ if num(r["lan_ms"]) is not None]
+        return f"median {median_low(v):.0f} max {max(v):.0f} (n {len(v)})" if v else "no samples"
+    print(f"  lan ms screen off: {lat([r for r in on if r['screen'] != 'Awake'])}; screen on: {lat([r for r in on if r['screen'] == 'Awake'])}")
+    vm = tsd = wd = 0; last_up = last_pid = last_wd = None
+    for r in rs:
+        up = num(r["uptime_s"])
+        if up is not None:
+            if last_up is not None and up < last_up: vm += 1
+            elif last_pid is not None and r["tailscaled_pid"] != last_pid: tsd += 1
+            last_up, last_pid = up, r["tailscaled_pid"]
+        w = num(r["wd_restarts"])
+        if w is not None:
+            if last_wd is not None and w > last_wd: wd += int(w - last_wd)
+            last_wd = w
+    dead = sum(1 for r in rs if r["watchdog"] == "dead")
+    print(f"  restarts: vm {vm}, tailscaled {tsd}, watchdog-triggered {wd}; watchdog dead {dead}")
+    fails = []
+    for r in on:
+        what = [k for k, bad in (("ssh", r["ssh"] != "ok"), ("android", r["android_path"] == "timeout"),
+                                 ("dokploy", r["dokploy"] != "ready"), ("box", r["box_path"] == "timeout")) if bad]
+        if what: fails.append(f"{r['time']} {' '.join(what)}")
+    if fails:
+        print("  failing rounds: " + "; ".join(fails[:20]) + (f"; +{len(fails) - 20} more" if len(fails) > 20 else ""))
+PY
+}
+
+case "$CMD" in
+  run) run ;;
+  summary) summary ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

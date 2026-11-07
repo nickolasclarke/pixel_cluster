@@ -1,3 +1,4 @@
+# shellcheck shell=bash disable=SC2016  # stub bodies are single-quoted on purpose: they expand inside the stub
 # tailnet-keepalive: pings the box; after KEEPALIVE_FAILS consecutive misses, and only if the guest's
 # tether gateway has stopped answering too, re-leases DHCP and restarts tailscaled. External
 # commands are stubbed on PATH and log their calls.
