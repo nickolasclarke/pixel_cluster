@@ -310,3 +310,38 @@ standby bucket `active`, and app hibernation off, a forced deep Doze (`dumpsys d
 on the Pixel 7 left the guest reachable over the tailnet, Dokploy validate green, and ssh working for
 the whole 4-minute test. Default is now screen off after 60 s (`svc power stayon false`). When driving
 the UI over adb, wake it first with `input keyevent KEYCODE_WAKEUP`. The provisioner applies all of it.
+
+## Tailnet stability investigation (2026-11-07, Pixel 7 and 6 Pro)
+
+Symptom: large transfers to the guests over the tailnet dropped, and inbound paths (laptop ->
+guest) sometimes stayed dead. Findings, in the order they matter:
+
+1. **The keepalive restarted tailscaled under load (fixed, bd81fc9).** The 20 s ping to the
+   Dokploy box goes overseas and misses three times in a row whenever the link is busy, and the
+   keepalive then re-ran udhcpc and restarted tailscaled. That killed every tailnet stream. The
+   Pixel 7 guest restarted tailscaled at every bulk copy and stream test. On the 6 Pro the re-lease
+   also moved the guest from 10.13.42.104 to .68 although its lease was still valid. Now the re-lease
+   and restart also require the default gateway on eth0 to stop answering. During the failed
+   transfers the gateway answered 456/456 pings, worst 47 ms.
+2. **Inbound paths depend on the China relay (derp-900).** The guests sit behind two NATs: the
+   Android tether (`avf_tap_*`) and the clarke router, whose WAN is 192.168.1.64 on the SUN
+   network. A client can only reach them directly if the relay coordinates hole punching, or if the
+   guest has recently sent to that client. A client that cannot reach 47.108.180.69:443 gets
+   neither a relay path nor a direct path. Seen with the laptop on SUN-5G plus the full-tunnel
+   `WG-Boyd-Ave`. The laptop logged `connect to region 900 (cn): context deadline exceeded`, and
+   test connections through the tunnel timed out, while the guests reach the relay in 37 ms from
+   clarke. Recovered by a `tailscale ping <client>` from the guest. Not verified: that tailscaled's
+   relay socket goes into the WG tunnel (no root to check its routing).
+3. **Phone Wi-Fi latency with the screen off.** Pixel 7 LAN pings averaged 805 ms (max 1.6 s) with
+   the screen off, and 36 ms (max 110 ms) with `svc power stayon true`. Its Wi-Fi had 26% of TX
+   frames retried at RSSI -62. User builds have no shell switch for Wi-Fi power save (`cmd wifi`
+   has none). The screen stays off by default.
+4. **Podroid's port forwards cut long uploads.** 300 MB sent to `192.168.15.140:30009`
+   (`podroid-forward`, relayed by the Podroid app in userspace) delivered 101,200 bytes and closed.
+   The download direction was not measured.
+5. **The laptop's own network moved under the tests.** Wi-Fi dropped at 12:51:26 (the hung scp)
+   and switched to SUN-5G at 14:27. The laptop's tailscaled also logs `restarted resolved` several
+   times a minute (2104 lines in 25 min), a likely cause of its Docker Hub DNS timeouts.
+
+Throughput (300 MB of zeros over ssh, with the old keepalive): laptop -> Android tailnet 20 MB/s;
+laptop -> guest tailnet 1.4-6.4 MB/s, often dropped.
