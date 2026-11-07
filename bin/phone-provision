@@ -7,6 +7,7 @@
 #   --reinstall   reinstall both APKs even if already present (upgrade path). Over the tailnet this
 #                 restarts Tailscale and drops adb mid-install: use USB or the phone's LAN address.
 #
+# A USB run also turns on network adb (port 5555), which a phone reboot turns off.
 # Manual steps it will stop and ask for: Podroid's first-run wizard (device-specific taps),
 # and removing a screen lock if one is set (needs the PIN/pattern; see docs/runbook.md §1).
 # Needs: adb, ssh, curl, python3, the dokploy CLI logged in, and either
@@ -17,7 +18,7 @@ cd "$(dirname "$0")/.."
 source bin/lib.sh
 
 REINSTALL=0; SERIAL=""; APK_DIR=${APK_DIR:-apks}
-for a in "$@"; do case "$a" in --reinstall) REINSTALL=1 ;; -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) SERIAL=$a ;; esac; done
+for a in "$@"; do case "$a" in --reinstall) REINSTALL=1 ;; -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) SERIAL=$a ;; esac; done
 [ -n "$SERIAL" ] || die "usage: bin/phone-provision <adb-serial | host:port>"
 adb -s "$SERIAL" get-state >/dev/null 2>&1 || die "adb cannot see $SERIAL (unauthorized, unplugged, or not connected over the network?)"
 ADB_TARGET=$SERIAL; SERIAL=$(adb_real_serial "$ADB_TARGET"); [ -n "$SERIAL" ] || die "cannot read the phone's serial via $ADB_TARGET"
@@ -41,6 +42,9 @@ done 3< pins/packages
 
 # 2. Phone settings (all idempotent) -------------------------------------------------------
 step "2 phone settings"
+# network adb on :5555 so the phone stays reachable off USB; before step 3, since it restarts adbd
+NET_ADB=$(adb_network_enable "$ADB_TARGET" 5555) || die "adb tcpip 5555 failed on $ADB_TARGET"
+[ -z "$NET_ADB" ] || echo "   $NET_ADB"
 PODROID_PKG=$(awk '$1=="podroid"{print $2}' pins/packages)
 adb -s "$ADB_TARGET" shell device_config set_sync_disabled_for_tests persistent
 adb -s "$ADB_TARGET" shell device_config put activity_manager max_phantom_processes 2147483647

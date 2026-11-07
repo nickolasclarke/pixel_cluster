@@ -150,6 +150,19 @@ adb_real_serial() { # <adb -s target> → ro.serialno
   adb -s "$1" shell getprop ro.serialno 2>/dev/null | tr -d '\r'
 }
 
+adb_network_enable() { # <adb -s target> <port> — leave adbd listening on <port> too, so the phone stays
+  # reachable after it leaves USB. `adb tcpip` restarts adbd (dropping forwards on this transport) and
+  # does not survive a phone reboot, so a USB provisioning run re-enables it.
+  local target=$1 port=$2
+  case "$target" in *:*) return 0 ;; esac   # host:port target: already network adb
+  if [ "$(adb -s "$target" shell getprop service.adb.tcp.port 2>/dev/null | tr -d '\r')" = "$port" ]; then
+    echo "network adb already on :$port"; return 0
+  fi
+  adb -s "$target" tcpip "$port" >/dev/null || return 1
+  timeout 30 adb -s "$target" wait-for-device || return 1
+  echo "network adb on :$port"
+}
+
 # --- charging limit (Pixel "Charging optimization": secure charge_optimization_mode 1 = Limit to 80%)
 charge_limit_label() { # <charge_optimization_mode value> → 80%|full
   [ "$1" = 1 ] && echo "80%" || echo full

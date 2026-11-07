@@ -194,7 +194,8 @@ Unlimited / SSH on), **Restart** in the app (the VM always starts early), Settin
 ## Control without USB (2026-11-06)
 
 - Guests: `ssh -p 2222 root@<guest tailnet IP>` from anywhere on the tailnet (operator key is installed).
-- Android: `adb tcpip 5555` once over USB (Nick runs it; it exposes a service), then
+- Android: a USB run of `bin/phone-provision` turns on `adb tcpip 5555` (Nick approved automating it
+  2026-11-07; it exposes a service, see below), then
   `adb connect <phone LAN IP>:5555`. The scripts accept `host:port` wherever they take a serial and
   key names/pins on the real serial. Lost on reboot without root. Reaching ADB from outside the LAN
   needs the Tailscale Android app logged in on the phone (done, see below): `adb connect <phone
@@ -492,7 +493,7 @@ Tailscale straight back after the forced restart.
 
 Lost in a reboot, as expected: network adb (port 5555 closed until `adb tcpip 5555` over USB, issue #1)
 and the watchdog. After a reboot: plug in USB, run `bin/phone-provision <usb serial>` (restarts the
-watchdog), then `adb -s <usb serial> tcpip 5555`.
+watchdog and turns network adb back on).
 
 Also a natural test: the clarke router power-cycled for a while (faulty power cable) about 16:27-17:30.
 Both guests kept their tether addresses, the keepalive (gateway check) did nothing, tailscaled
