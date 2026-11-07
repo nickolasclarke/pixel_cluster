@@ -497,3 +497,16 @@ watchdog), then `adb -s <usb serial> tcpip 5555`.
 Also a natural test: the clarke router power-cycled for a while (faulty power cable) about 16:27-17:30.
 Both guests kept their tether addresses, the keepalive (gateway check) did nothing, tailscaled
 reconnected by itself, and Hermes on the 6 Pro answered again without intervention.
+- **DO box ssh (2026-11-07 ~19:45):** plain ssh from clarke failed because the DO cloud firewall
+  allowlists port 22 by source IP and the US exit had moved from 135.180.37.209 to 135.180.36.137.
+  Added 135.180.36.137 to the port 22 rule with doctl (Nick ran the command; it needed one line).
+  Rules now: 22 from four addresses, 443 from anywhere, UDP 41641 from anywhere.
+- **DO box tailscaled, 14 days:** about 7,000 `connect to region 900 (cn): dial tcp4
+  47.108.180.69:443: i/o timeout` lines (roughly 500 a day), and exactly three `derp-900 connected`
+  events: Nov 6 16:23:35Z, 16:25:36Z and 17:23:57Z. The first matches the derper's one DO-sourced
+  session (00:24:53 CST), which the relay closed with a read timeout within about a minute. So DO's
+  SYNs reach the relay only rarely, and a session that does form loses packets until it dies.
+- **mtr from DO to the relay:** hops 1-8 answer (DO, then China Telecom backbone 202.97.51.194 and
+  202.97.54.73 at 140 ms), hop 13 is 118.112.16.214 (China Telecom Sichuan, 182 ms), nothing after.
+  Packets from DO enter China and reach the relay's province; the loss is at or after the last
+  Telecom hop before Aliyun. The June test with the security group open to 0.0.0.0/0 stands.
