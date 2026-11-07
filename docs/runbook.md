@@ -436,3 +436,8 @@ handoff. An AP that browns out under sustained traffic drops bulk flows mid-tran
 also kills the guests' relay TCP sessions, which is the zombie-socket pattern the derper logs. Still
 to confirm: that no failures recur over a longer series and on the 6 Pro, and that the derper stops
 logging client timeouts for clarke clients from now on.
+6. **The 6 Pro guest also completes 3 of 3** (19:11-19:15, Nick's go-ahead, Hermes answering on
+   :9119 before and after): 80, 68, 68 s at about 4 MB/s, ssh exit 0, direct path via the 6 Pro's
+   Android NAT (192.168.15.168:22356) throughout. Guest load rose to 2.7 during the runs; RAM unchanged.
+   Nick confirms the 18:xx Wi-Fi events were him fixing the router's power supply, so every failure in
+   this investigation predates the fix and every pass follows it.
