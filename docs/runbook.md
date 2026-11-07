@@ -569,3 +569,21 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
   marketed for non-mainland traffic, and mainland reachability is the whole point. Candidate:
   swas.s.c2m05s20b1.linux, 2 vCPU, 0.5 GiB, 20 GB, 200 Mbps BGP, USD 4/month. derper needs well under
   100 MB of RAM.
+- **Hong Kong is sold out** (three plans, all `NotEnoughStock`); Tokyo and Singapore list the same
+  plans. Key pair `framework-aliyun` imported in cn-hongkong and ap-northeast-1 (no cost).
+- **The Chengdu box cannot reach HK, Tokyo or Singapore at all**, not even Aliyun's own storage
+  endpoints there (TLS connect times out; only cn-chengdu answers). It is sealed off from everything
+  outside the mainland in both directions.
+- **Cross-border latency from the clarke router's China WAN (eth0 192.168.1.64, 2026-11-07 ~23:40),**
+  TLS connect on 443, 5 samples; ICMP 10 packets:
+
+  | target | TCP connect | ICMP |
+  |---|---|---|
+  | Chengdu relay 47.108.180.69 | 23-26 ms | 18.6 ms, 0% loss |
+  | DO box 165.22.145.26 (San Francisco) | 190-198 ms | not measured |
+  | Tokyo oss endpoint 47.79.81.66 | 237-251 ms, two SYN retransmits (1.3 s, 3.3 s) | 244 ms, 30% loss |
+  | Singapore 47.79.50.81 | 358-377 ms | 353 ms, 20% loss |
+  | Hong Kong 47.79.66.112 | 369-387 ms | 372 ms, 20% loss |
+
+  From this ISP the US west coast is the best cross-border path, not Hong Kong. Through the WG
+  tunnel (US exit) the three Asian endpoints are all about 350 ms.
