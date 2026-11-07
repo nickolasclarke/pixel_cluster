@@ -538,3 +538,14 @@ Purpose: confirm over a long series that the router power fix was the whole stor
 Dokploy validate and the guest's direct path to the box stay up), and whether screen-off LAN
 latency (805 ms average before the fix) still matters. First trial round: Dokploy validate
 failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
+- **The relay box is an Aliyun Simple Application Server, not ECS** (2026-11-07 23:00, from Nick's
+  console screenshot and the SWAS-OPEN API with a RAM user `headscale_llm` + AliyunSWASOpenFullAccess
+  on account ...2386). Instance 1de80d74c52f44229d0524f8fbf539ad "headscale", cn-chengdu, plan
+  swas.s.c2m1s30b1.linux (2 vCPU, 1 GiB, 30 GB ESSD, 200 Mbps BGP, USD 5.7/month, no traffic package
+  reported), expires 2026-11-19. The metadata owner-account-id 5781943584350742 is Aliyun's hosting
+  account for the product, not Nick's; ECS DescribeInstances is empty because the box is not ECS.
+  SWAS firewall: TCP 22/80/443, ICMP and UDP 3478 all from 0.0.0.0/0. Nothing on Aliyun's side
+  restricts inbound, consistent with the capture.
+- A stdlib helper for signed Aliyun API calls lives in the session scratchpad (`aliyun_api.py`,
+  reads the key from ~/.config/pixel_cluster/aliyun-access-key-*); to be moved into headscale-cn
+  `commands/` once the next step is settled.
