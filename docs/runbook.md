@@ -60,7 +60,7 @@ Launch `com.excp.podroid`. Tap coordinates are for 1080x2400.
 |---|---|---|
 | 1 Storage | size | 32 GB (only selectable after step 2's Load balance is off; go Back) |
 | 2 Configure | Load balance | **off** |
-| 2 | RAM / cores / bandwidth | the largest RAM Podroid offers (it reserves ~3 GB for Android: 4 GB on an 8 GB phone, 8 GB on 12 GB), top core count (on AVF anything above 1 means all cores), Unlimited. Decided 2026-11-06: the phones do nothing else. Earlier phones were 2 GB / 4 cores. |
+| 2 | RAM / cores / bandwidth | **4 GB** RAM on 8 GB and 12 GB phones (see Sizing policy), top core count (on AVF anything above 1 means all cores), Unlimited. Earlier phones were 2 GB / 4 cores. |
 | 2 | SSH access | on |
 | 3 Downloads sharing | | off |
 | 4 USB passthrough | | off |
@@ -140,13 +140,18 @@ Dokploy server `pixel-6-pro-podroid`, nginx smoke test at `http://100.64.0.10:30
   and `user_rotation 0` did not take effect immediately. Taps were done in landscape coordinates.
 
 
-## Sizing policy (2026-11-06)
+## Sizing policy (2026-11-06, RAM revised 2026-11-07)
 
-The phones do nothing else, so: top core count (AVF uses all cores for anything above 1), the
-largest RAM Podroid offers (it keeps ~3 GB for Android, which is what stops Android killing the VM),
-and the largest disk that still leaves Android about 10 GB (64 GB on a 128 GB phone). Set Battery >
+The phones do nothing else, so: top core count (AVF uses all cores for anything above 1), **4 GB
+guest RAM** on 8 GB and 12 GB phones, and the largest disk that still leaves Android about 10 GB (64 GB on a 128 GB phone). Set Battery >
 Charging optimization to the 80 % limit; these sit on power permanently and all-core load throttles
 thermally. RAM and CPU changes need a VM stop; pick them in the wizard on a fresh phone.
+
+RAM is 4 GB, not the largest Podroid offers: guest memory never returns to Android (no balloon
+driver), so after any heavy disk IO the whole guest size is a standing cost to Android. At 8 GB the
+6 Pro was killed during a large `docker load`; 6 GB survived with 140 MB of swap left; 4 GB survived
+on both phones (measurements under "Guest RAM step-down" below). Change it in Podroid > Settings >
+VM resources with the VM stopped (the chips are 512 MB, 1, 2, 4, 6, 8 GB).
 
 ## Pixel 7 rebuilt from a factory reset (2026-11-06)
 

@@ -82,8 +82,8 @@ fi
 if ! vm_up; then
   cat <<MSG
    The VM is not answering on guest port 22 (dropbear, via adb forward $LOCAL_PORT). If this is the phone's first run, finish Podroid's wizard on
-   the phone (docs/runbook.md §2: load balance OFF, largest disk leaving Android ~10 GB, largest RAM
-   offered, top core count, Unlimited, SSH ON),
+   the phone (docs/runbook.md §2: load balance OFF, largest disk leaving Android ~10 GB, 4 GB RAM,
+   top core count, Unlimited, SSH ON),
    then switch on Settings > Start VM on boot, start the VM, and re-run this script.
 MSG
   exit 2
