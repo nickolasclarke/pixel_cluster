@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# natpath — plain-TCP throughput endpoint for isolating a network path from the tailnet.
+# Listens on a port; 'recv' counts bytes a client sends, 'send' pushes zeros to the client.
+# Prints MB and MB/s every 2 s, and an ERROR line with the byte count if the flow stalls 40 s.
+#
+# Usage: bin/natpath recv|send <port> [mb]      (default 300 MB)
+# Pair it with 'toybox nc <laptop-ip> <port>' on an Android phone or 'nc' in a guest.
+import socket, sys, time
+
+def usage(code):
+    print(__doc__ or "", file=sys.stderr)
+    print("Usage: bin/natpath recv|send <port> [mb]", file=sys.stderr); sys.exit(code)
+
+args = sys.argv[1:]
+if args == ["--help"] or args == ["-h"]: usage(0)
+if len(args) not in (2, 3) or args[0] not in ("recv", "send"): usage(2)
+mode, port = args[0], int(args[1]); total = (int(args[2]) if len(args) == 3 else 300) * 1048576
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("0.0.0.0", port)); s.listen(1); s.settimeout(60)
+c, a = s.accept(); c.settimeout(40); print(time.strftime("%T"), "conn from", a, flush=True)
+t0 = time.time(); n = 0; last = t0; chunk = b"\0" * 65536
+try:
+    while n < total:
+        if mode == "recv":
+            d = c.recv(1048576)
+            if not d: break
+            n += len(d)
+        else:
+            c.sendall(chunk); n += len(chunk)
+        if time.time() - last >= 2:
+            last = time.time(); print(time.strftime("%T"), "%d MB %.1f MB/s" % (n // 1048576, n / 1048576 / (last - t0)), flush=True)
+except Exception as e:
+    print(time.strftime("%T"), "ERROR", repr(e), "at", n, flush=True)
+print(time.strftime("%T"), "done bytes=%d avg %.1f MB/s" % (n, n / 1048576 / max(time.time() - t0, 0.001)), flush=True)
+c.close()

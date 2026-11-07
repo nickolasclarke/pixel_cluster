@@ -401,7 +401,7 @@ Findings:
 
 Not changed: headscale, relay, routers, firewall, phones (the screen-on test never ran: adb
 dropped when the laptop left clarke). Probe scripts are in the session scratchpad, to be moved
-into `bin/` once the test matrix settles.
+into `bin/` once the test matrix settles (done 2026-11-07 evening: `bin/guest-xfer-probe`, `bin/natpath`).
 
 ### Third pass (2026-11-07 evening): the clarke router was underpowered
 

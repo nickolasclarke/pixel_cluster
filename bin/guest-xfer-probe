@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# guest-xfer-probe — push an ssh stream of zeros into a Podroid guest while sampling both ends:
+# guest TCP socket state, interface and UDP counters, tailscaled metrics; laptop socket state and
+# the peer's tailnet path (relay/direct) each second. One directory of text files per run.
+#
+# Usage: bin/guest-xfer-probe <pixel-7|pixel-6-pro> <outdir> [rate_bytes_per_sec|0] [mb]
+#   rate   throttle the writer (0 = unthrottled, default); mb defaults to 300
+# Prints transfer start/end and the ssh exit code; samples land in <outdir>/{guest,laptop}_samples.txt.
+# Summarise a run with: grep -E '^relay=' <outdir>/laptop_samples.txt | awk '{print $2}' | sort | uniq -c
+set -uo pipefail
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; }
+[ "${1:-}" = --help ] || [ "${1:-}" = -h ] && { usage; exit 0; }
+[ $# -ge 2 ] || { usage >&2; exit 2; }
+case "$1" in
+  pixel-7)     G=100.64.0.11; GNAME=pixel-7-podroid ;;
+  pixel-6-pro) G=100.64.0.10; GNAME=pixel-6-pro-podroid ;;
+  *) echo "error: unknown guest '$1' (pixel-7 or pixel-6-pro)" >&2; exit 2 ;;
+esac
+OUT=$2; RATE=${3:-0}; MB=${4:-300}; mkdir -p "$OUT"
+GPORT=2222; DUR=400
+SSHO=(-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+ssh "${SSHO[@]}" -p "$GPORT" root@"$G" "mkdir -p /tmp/probe2; cd /tmp/probe2; rm -f *; nohup sh -c 'for i in \$(seq 1 $DUR); do echo \"== \$(date +%T)\"; grep -E \"eth0|tailscale0\" /proc/net/dev; grep -E \"^Udp:\" /proc/net/snmp | tail -1; ss -tni sport = :2222; tailscale metrics print 2>/dev/null | grep -v \"^#\" | grep -E \"dropped|inbound_packets|outbound_packets\"; sleep 1; done' >samples.txt 2>&1 & echo \$! >pid" \
+  || { echo "error: cannot reach guest $G" >&2; exit 1; }
+( for _ in $(seq 1 $DUR); do echo "== $(date +%T)"; ss -tni dst "$G"; tailscale status --json | python3 -I -c 'import sys,json; d=json.load(sys.stdin); p=[p for p in d["Peer"].values() if p["HostName"]==sys.argv[1]][0]; print("relay=%s cur=%s tx=%s rx=%s"%(p["Relay"],p["CurAddr"],p["TxBytes"],p["RxBytes"]))' "$GNAME"; sleep 1; done ) >"$OUT/laptop_samples.txt" 2>&1 &
+P3=$!
+journalctl -u tailscaled -f --no-pager -n0 2>&1 | grep --line-buffered -v -E 'restarted resolved|trample|dns:|Got notification' >"$OUT/laptop_tailscaled.txt" &
+P1=$!
+sleep 3
+echo "transfer start $(date +%T) rate=$RATE mb=$MB" | tee "$OUT/transfer.txt"
+python3 -I -u - "$RATE" "$MB" 2>>"$OUT/transfer.txt" <<'PY' | ssh "${SSHO[@]}" -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -p "$GPORT" root@"$G" 'cat >/dev/null'
+import sys,time,os
+rate=int(sys.argv[1]); total=int(sys.argv[2])*1024*1024; chunk=b'\0'*65536; sent=0; t0=time.time(); last=0
+out=os.fdopen(1,'wb',0)
+while sent<total:
+    try: out.write(chunk)
+    except BrokenPipeError: print(time.strftime('%T'),"broken pipe at",sent,file=sys.stderr); break
+    sent+=len(chunk)
+    el=time.time()-t0
+    if rate and sent/rate>el: time.sleep(sent/rate-el)
+    if el-last>=5: last=el; print(time.strftime('%T'),"sent %d MB %.1f MB/s"%(sent//1048576, sent/1048576/el),file=sys.stderr)
+print(time.strftime('%T'),"writer done sent",sent,file=sys.stderr)
+PY
+echo "transfer end $(date +%T) ssh_exit=${PIPESTATUS[1]}" | tee -a "$OUT/transfer.txt"
+sleep 10
+kill $P1 $P3 2>/dev/null; pkill -f 'journalctl -u tailscaled -f' 2>/dev/null
+ssh "${SSHO[@]}" -p "$GPORT" root@"$G" 'kill $(cat /tmp/probe2/pid) 2>/dev/null; cat /tmp/probe2/samples.txt' >"$OUT/guest_samples.txt"
+wc -l "$OUT"/*
