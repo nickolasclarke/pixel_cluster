@@ -349,3 +349,56 @@ After the keepalive fix, with the laptop back on clarke: 0 tailscaled restarts, 
 still dropped (58-170 s, 1.8-5.2 MB/s), screen on or off. The laptop's log shows the guest's path
 going derp/direct every 20-30 s during each transfer. Investigation handed off in
 `docs/handoffs/2026-11-07-tailnet-relay-and-bulk-transfers.md`.
+
+### Second pass (2026-11-07 afternoon, from the handoff)
+
+Method: one instrumented 300 MB transfer to the Pixel 7 guest with per-2 s counters on every hop
+(laptop, Android, guest, relay), then plain-TCP throughput tests that each cross a single hop.
+Findings:
+
+1. **The guest, its tailscaled, and the virtio tap are not the bottleneck.** Plain TCP between
+   Android and the guest over `avf_tap_fixed` moves 300 MB in 1-3 s (75 MB/s) in both directions.
+   During the tailnet transfer the guest's CPU stayed 88% idle, `/proc/net/dev` showed 0 drops,
+   UDP InErrors stayed 0, and tailscaled's `tailscaled_inbound_dropped_packets_total` metrics did not
+   exist (no inbound drops). The lower packet count on `tailscale0` than on `eth0` is tailscaled's
+   TCP GRO coalescing, not loss.
+2. **Bulk TCP across the clarke Wi-Fi stalls with no tunnel involved.** Plain TCP, no WireGuard:
+   laptop -> guest through the Android NAT stalled after 1.3 MB; guest -> laptop ran 4-7 MB/s and
+   stalled at 45 MB; laptop -> Android (no guest, no NAT) stalled after 256 KB; Android -> laptop
+   stalled at 16 MB. The tailnet transfer shows the same shape: 26 MB burst in 2 s, then the TCP
+   flow dies (laptop retransmits every RTO, guest receives nothing), ssh gives up 30 s later. During
+   the stall, ICMP pings guest -> laptop (1/s) had 0 loss and < 100 ms, while laptop <-> Android
+   pings lost 9 of 70 and the guest's sshd measured 2 s RTTs. So small, slow flows survive and
+   sustained flows die. Not yet isolated: the Pixel 7 radio, the laptop radio, or the AP/router.
+   The earlier 20 MB/s adb result to the Android node is unexplained by this and needs a repeat.
+3. **The relay sees the same Wi-Fi failure.** derper's only client errors over 7 days are
+   `read: connection timed out` / `no route to host` for every clarke client (both guests, both
+   Android nodes, and the laptop, 5-13 each), i.e. the relay's keepalives stop being ACKed. The
+   derper does not restart and has no firewall limits (tcp_retries2 15, conntrack 5 d). The guest
+   learns of the dead socket only when it next writes (`connection reset by peer`, 17 on the 6 Pro),
+   so it can sit on a zombie relay connection for a long time, during which the relay answers the
+   laptop with `derp-900 does not know about peer`.
+4. **Under load the guest's netcheck reports `UDP is blocked`** (3 times in the 14:55-15:10 window)
+   because its STUN probes get no answer, and it rehomes to the lowest HTTPS-latency region
+   (Dubai 514 ms, Denver, Chicago, Los Angeles) before returning to cn. Each move opens TCP
+   connections that also get reset.
+5. **Laptop behind the full-tunnel WG (SUN-5G + WG-Boyd-Ave, 16:20):** tailscaled's own relay
+   connection is fine. Its fwmark 0x80000 bypass routes 47.108.180.69 out `wlp170s0`
+   (`ip route get ... mark 0x80000`), the socket is ESTAB at 36 ms RTT, netcheck sees cn at
+   23 ms with UDP working, and `curl --interface wlp170s0 https://47.108.180.69/derp/probe` is 200
+   in 82 ms. Default-routed traffic goes out the WG to 135.180.36.137 and is border-blocked. Yet all
+   four phone nodes are unreachable (`tailscale ping` no reply; dokploy answers in 288 ms) and the
+   laptop logs `derp-900 does not know about peer [VLtW2]/[sASWC]` every few seconds: the guests are
+   not on the relay (finding 3 and 4), not the laptop's side. The 14:50 `connect to region 900:
+   context deadline exceeded` errors from earlier today are therefore not reproduced; the laptop
+   runs v2rayA (`v2raya_core`, transparent proxy, DNS hijack to 127.2.0.17), and on clarke its relay
+   TCP showed two sockets with identical byte counts (one at 0.06 ms RTT), which is a local
+   intercept. Whether v2rayA pulled the relay dial into the WG at 14:50 needs `sudo nft list
+   ruleset`.
+6. **Side finding:** the `restarted resolved` log storm on the laptop is tailscaled fighting
+   v2rayA's resolv.conf hijack (`trample: resolv.conf changed ... "# v2rayA DNS hijack"`), and after
+   the Wi-Fi move resolv.conf is tailscale-owned with only 100.100.100.100.
+
+Not changed: headscale, relay, routers, firewall, phones (the screen-on test never ran: adb
+dropped when the laptop left clarke). Probe scripts are in the session scratchpad, to be moved
+into `bin/` once the test matrix settles.
