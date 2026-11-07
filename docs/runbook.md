@@ -290,6 +290,14 @@ stopped the phone has 9.0 GB available and 2.8 GB of its 3 GB swap free.
 - Image contents were correct at both sizes on overlay2 (one empty non-`__init__` `.py` file,
   `google/auth/crypt/_helpers.py`, which is also empty in the published image).
 
+Pixel 7 (8 GB phone, Android 16 BP2A.250605.031.A2), same test at its existing 4 GB: load 2 min 4 s,
+Podroid survived, lowest Android MemAvailable 685 MB, lowest SwapFree 1879 MB, 982 MB available
+afterwards, image contents correct. No MemoryLimiter line and no am_kill during the run. The
+6 Pro runs Android 17 (CP3A.261005.002.A1); whether the 3 GB MemoryLimiter is an Android 17 feature
+is not verified. Copying the 1 GB of image chunks to the Pixel 7 guest over the tailnet dropped
+the ssh stream 5 times and once hung it outright; use `-o ServerAliveInterval=10
+-o ServerAliveCountMax=3` and per-chunk checksums with retry for large copies.
+
 ## Screen off and Doze (tested 2026-11-06)
 
 With Podroid on the deviceidle whitelist plus `RUN_ANY_IN_BACKGROUND`/`RUN_IN_BACKGROUND` allowed,
