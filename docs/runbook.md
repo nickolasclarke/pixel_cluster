@@ -479,3 +479,21 @@ Found while re-running the provisioner over the tailnet: step 1 looked up instal
 the phone's USB serial, found nothing, and reinstalled Tailscale over the tailnet. That restarted
 Tailscale and dropped adb mid-install. Fixed: lookups use the adb target. Always-on VPN brought
 Tailscale straight back after the forced restart.
+
+## Reboot test, Pixel 7 (2026-11-07)
+
+`adb reboot` at 19:30:45 with the screen off and no one touching the phone:
+
+| Layer | Back after |
+|---|---|
+| Guest ssh on the tailnet (Podroid boot autostart, then guest tailscaled) | 28 s |
+| Android Tailscale node (always-on VPN) | 43 s |
+| Dokploy `server.validate` | ready, traefik running, keepalive running |
+
+Lost in a reboot, as expected: network adb (port 5555 closed until `adb tcpip 5555` over USB, issue #1)
+and the watchdog. After a reboot: plug in USB, run `bin/phone-provision <usb serial>` (restarts the
+watchdog), then `adb -s <usb serial> tcpip 5555`.
+
+Also a natural test: the clarke router power-cycled for a while (faulty power cable) about 16:27-17:30.
+Both guests kept their tether addresses, the keepalive (gateway check) did nothing, tailscaled
+reconnected by itself, and Hermes on the 6 Pro answered again without intervention.
