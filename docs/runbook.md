@@ -510,3 +510,14 @@ reconnected by itself, and Hermes on the 6 Pro answered again without interventi
   202.97.54.73 at 140 ms), hop 13 is 118.112.16.214 (China Telecom Sichuan, 182 ms), nothing after.
   Packets from DO enter China and reach the relay's province; the loss is at or after the last
   Telecom hop before Aliyun. The June test with the security group open to 0.0.0.0/0 stands.
+- **Decisive capture (2026-11-07 20:15 CST):** a raw-socket capture on the Aliyun host while the DO
+  box dialed 47.108.180.69:443 five times. Every SYN from 165.22.145.26 arrived at the host and the
+  host answered each with a SYN-ACK; DO never saw them and kept retransmitting SYNs. Inbound from
+  outside China works. The loss is on the Aliyun box's return path.
+- **Outbound traces from the Aliyun box:** to DO, 1.1.1.1 and 8.8.8.8 the packets leave the Aliyun
+  network (hops 6-9: 172.19.x, 10.x, then China Telecom 101.207.253.229 or China Mobile
+  221.183.89.185) and vanish at the carrier border. Not the security group and not the VPC route:
+  those would drop before the packets reached a carrier hop. The June finding that the box is
+  "unreachable from abroad" is really "the box cannot send abroad", which the derper client's
+  occasional one-minute sessions fit (a few return packets leak through, then nothing).
+- **No tcpdump and no aliyun CLI on the box.** Nothing was installed.
