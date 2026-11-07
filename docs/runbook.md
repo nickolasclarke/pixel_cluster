@@ -587,3 +587,16 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
 
   From this ISP the US west coast is the best cross-border path, not Hong Kong. Through the WG
   tunnel (US exit) the three Asian endpoints are all about 350 ms.
+
+### Embedded DERP "do" enabled on headscale (2026-11-08 00:08 CST)
+
+- Tokyo purchase failed through the API: NORMAL plans report `NotEnoughStock` for this account
+  (only INTERNATIONAL/BGP_NCO plans are offered), and the INTERNATIONAL plan failed with
+  `SYNC_PAYMENT_NOT_SUPPORT` (no payment method the API can debit). Console purchase deferred.
+- Nick chose headscale's embedded DERP on the DO box instead. headscale-cn branch `wip/embedded-derp`
+  commit 3fc42a3: `derp.server.enabled: true`, region 999 code `do` "DigitalOcean SFO", ipv4
+  165.22.145.26, STUN 0.0.0.0:3478; compose publishes 3478/udp. DO cloud firewall: UDP 3478 from
+  anywhere added with doctl. `headscale configtest` passed in a throwaway container; deployed via
+  Dokploy mounts update + compose update + compose deploy (container recreated, so no manual restart
+  needed this time). Health `pass`, `/derp/probe` 200, logs show the region and STUN started.
+- Laptop netcheck now lists do at 207 ms (via the WG, same as sfo); cn 24.7 ms stays nearest.
