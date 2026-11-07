@@ -255,6 +255,19 @@ used: pull on a machine with clean egress (`docker pull --platform linux/arm64 .
 in with `docker save | ssh -p 2222 root@<guest> docker load`. A registry mirror would be the
 durable fix if phones are going to deploy large images from that network.
 
+## Android killed the VM for memory (2026-11-07)
+
+Loading the 4.3 GB hermes-agent image (`docker load`) on the 6 Pro guest (8 GB RAM on a 12 GB
+phone) made the guest unresponsive for minutes at a time, then Android killed Podroid outright:
+`ActivityManager: Killing com.excp.podroid (adj 200): MemoryLimiter:AnonSwap`, preceded by
+lowmemorykiller clearing every cached app with "device is not responding" and Android swap at
+3071/3071 MB. The guest's page cache had filled its whole 8 GB, which is host anonymous memory to
+Android. The deviceidle whitelist, background app ops and active standby bucket do not protect
+against this kill. Podroid did not restart the VM afterwards; `am start -a
+com.excp.podroid.action.START_VM` brought it back in under 20 s with docker, traefik and the tailnet
+path intact. Implication: the max-RAM sizing policy leaves Android too little headroom under heavy
+guest IO, and a killed VM stays down until something restarts it.
+
 ## Screen off and Doze (tested 2026-11-06)
 
 With Podroid on the deviceidle whitelist plus `RUN_ANY_IN_BACKGROUND`/`RUN_IN_BACKGROUND` allowed,
