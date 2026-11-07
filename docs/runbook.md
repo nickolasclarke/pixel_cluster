@@ -268,6 +268,28 @@ com.excp.podroid.action.START_VM` brought it back in under 20 s with docker, tra
 path intact. Implication: the max-RAM sizing policy leaves Android too little headroom under heavy
 guest IO, and a killed VM stays down until something restarts it.
 
+### Guest RAM step-down on the 6 Pro (2026-11-07)
+
+Same test at each size: VM restarted at the new size, then `docker load` of the same 4.3 GB
+hermes-agent tar from the guest disk, Android memory sampled every 10 s over adb. With the VM
+stopped the phone has 9.0 GB available and 2.8 GB of its 3 GB swap free.
+
+| Guest RAM | Load | Podroid | Lowest Android MemAvailable | Lowest Android SwapFree |
+|---|---|---|---|---|
+| 8 GB | did not finish | killed (`MemoryLimiter:AnonSwap`) | n/a | 0 (3071/3071 used) |
+| 6 GB | 2 min 21 s | survived | 3447 MB | 140 MB |
+| 4 GB | 2 min 56 s | survived | 4806 MB | 733 MB |
+
+- Android's MemoryLimiter logs `onLimitExceeded ... type=memory.high memHigh=3221225472
+  swapHigh=3221225472 pkg=com.excp.podroid` early in every run at 4, 6 and 8 GB: Podroid has a
+  3 GB memory.high limit. Not verified: that the limiter pushes everything above 3 GB into swap and
+  kills once swap runs out. It fits the numbers, since swap use grows with guest size.
+- The guest has no virtio-balloon driver. `echo 3 > /proc/sys/vm/drop_caches` freed 3.8 GB inside
+  the guest and changed nothing on the Android side. Guest memory, once touched, stays with Podroid
+  until the VM stops, so the guest size is a standing cost to Android, not a peak.
+- Image contents were correct at both sizes on overlay2 (one empty non-`__init__` `.py` file,
+  `google/auth/crypt/_helpers.py`, which is also empty in the published image).
+
 ## Screen off and Doze (tested 2026-11-06)
 
 With Podroid on the deviceidle whitelist plus `RUN_ANY_IN_BACKGROUND`/`RUN_IN_BACKGROUND` allowed,
