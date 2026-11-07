@@ -159,6 +159,8 @@ adb_network_enable() { # <adb -s target> <port> — leave adbd listening on <por
     echo "network adb already on :$port"; return 0
   fi
   adb -s "$target" tcpip "$port" >/dev/null || return 1
+  # the old transport stays listed for a moment, so wait-for-device alone returns on it at once
+  timeout 15 adb -s "$target" wait-for-disconnect || return 1
   timeout 30 adb -s "$target" wait-for-device || return 1
   echo "network adb on :$port"
 }

@@ -14,7 +14,7 @@ case "\$*" in
   *"getprop ro.product.model"*) echo "Pixel 7" ;;
   *"dumpsys package"*) echo "    versionCode=123 minSdk=26 targetSdk=36" ;;
   *" tcpip "*) exit ${2:-0} ;;
-  *install*|*wait-for-device*) exit 0 ;;
+  *install*|*wait-for-*) exit 0 ;;
   *) exit 1 ;;
 esac
 STUB

@@ -19,7 +19,7 @@ STUB
 }
 r=$(ne_run 28161FDH200LY1 "")
 assert_eq "yes" "$(echo "$r" | grep -q -- '-s 28161FDH200LY1 tcpip 5555' && echo yes)" "network adb: USB target with adb off gets tcpip 5555"
-assert_eq "yes" "$(echo "$r" | grep -q -- 'tcpip 5555;-s 28161FDH200LY1 wait-for-device' && echo yes)" "network adb: waits for the USB transport to come back after adbd restarts"
+assert_eq "yes" "$(echo "$r" | grep -q -- 'tcpip 5555;-s 28161FDH200LY1 wait-for-disconnect;-s 28161FDH200LY1 wait-for-device' && echo yes)" "network adb: waits for the old USB transport to drop, then for the new one (wait-for-device alone returns on the stale one)"
 assert_eq "network adb on :5555" "${r%%|*}" "network adb: reports the port it enabled"
 r=$(ne_run 28161FDH200LY1 "5555")
 assert_eq "0" "$(echo "$r" | grep -c tcpip)" "network adb: already listening on 5555 leaves adbd alone"
