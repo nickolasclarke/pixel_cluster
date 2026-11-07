@@ -108,10 +108,13 @@ and at `http://<phone LAN IP>:30000/` through the Podroid forward.
 
 ## Open items
 
-- "Start VM on boot" is a Podroid Settings toggle, not yet set over adb.
 - Direct-path test on the China-direct Wi-Fi.
-- The Android-app node (`pixel-7`, 100.64.0.8) and the guest node (`pixel-7-podroid`, 100.64.0.9)
-  are two headscale nodes per phone; fine, but `phone-status` should show both.
+
+Resolved (2026-11-07):
+- "Start VM on boot" stays a manual wizard step (no adb way to set it found). The provisioner asks
+  for it, and the Pixel 7 reboot test confirmed it set.
+- Each phone is two headscale nodes, the Android app (`pixel-7`) and the guest (`pixel-7-podroid`);
+  `bin/phone-status` shows both (`node:` and `android-node:`) and fails if either is offline.
 
 ## Second phone: Pixel 6 Pro (`1B231FDEE0033H`, Android 17), 2026-11-06
 
@@ -522,3 +525,16 @@ reconnected by itself, and Hermes on the 6 Pro answered again without interventi
   "unreachable from abroad" is really "the box cannot send abroad", which the derper client's
   occasional one-minute sessions fit (a few return packets leak through, then nothing).
 - **No tcpdump and no aliyun CLI on the box.** Nothing was installed.
+
+## Overnight soak (started 2026-11-07 22:48)
+
+`bin/phone-soak run ~/.local/state/pixel_cluster/soak-20261107.tsv`, detached under
+`systemd-inhibit --what=idle:sleep` so the laptop does not idle-suspend (a lid close may still
+suspend it; gaps show as "max gap" in the summary). One line per phone every 5 min, no transfers.
+Read it with `bin/phone-soak summary <file>`; stop it with `pkill -f 'phone-soak run'` from a
+shell whose own command line does not contain that string.
+
+Purpose: confirm over a long series that the router power fix was the whole story (guest ssh,
+Dokploy validate and the guest's direct path to the box stay up), and whether screen-off LAN
+latency (805 ms average before the fix) still matters. First trial round: Dokploy validate
+failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.

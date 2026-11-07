@@ -36,6 +36,9 @@ assert_eq "" "$(find_server_id tests/fixtures/dokploy-servers.json nope)" "find_
 
 # --- Task 4: phone-status helpers ---
 assert_eq "1.2.9" "$(parse_version_name "$(cat tests/fixtures/pm-dump.txt)")" "parse_version_name"
+# a package that is not installed is an answer, not an error: callers assign under set -e -o pipefail
+assert_eq "0" "$(parse_version_name 'Unable to find package: com.tailscale.ipn' >/dev/null; echo $?)" "parse_version_name succeeds with empty output when not installed"
+assert_eq "0" "$(parse_version_code 'Unable to find package: com.tailscale.ipn' >/dev/null; echo $?)" "parse_version_code succeeds with empty output when not installed"
 assert_eq "yes" "$(version_matches_pin 1.2.9 v1.2.9)" "version matches pin with v prefix"
 assert_eq "no" "$(version_matches_pin 1.2.8 v1.2.9)" "version behind pin"
 assert_eq "online" "$(node_state tests/fixtures/ts-status.json pixel-7-podroid)" "node_state online"

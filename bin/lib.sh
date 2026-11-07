@@ -51,7 +51,7 @@ verify_sha256() { # <file> <expected-hex> — on mismatch deletes the file and r
 # --- phone-provision helpers ---
 
 parse_version_code() { # <dumpsys-package-text> → versionCode, or empty if the package is not installed
-  printf '%s\n' "$1" | grep -oE 'versionCode=[0-9]+' | head -1 | cut -d= -f2
+  printf '%s\n' "$1" | sed -nE 's/.*versionCode=([0-9]+).*/\1/p' | head -1
 }
 
 adb_installed_version() { # <serial> <package> → versionCode or empty
@@ -112,7 +112,7 @@ dk_post() { # <path> <json-body>
 # --- phone-status helpers ---
 
 parse_version_name() { # <dumpsys-package-text> → versionName or empty
-  printf '%s\n' "$1" | grep -oE 'versionName=[^ ]+' | head -1 | cut -d= -f2
+  printf '%s\n' "$1" | sed -nE 's/.*versionName=([^ ]+).*/\1/p' | head -1
 }
 
 version_matches_pin() { # <installed-versionName> <pinned-version, optional leading v> → yes|no
