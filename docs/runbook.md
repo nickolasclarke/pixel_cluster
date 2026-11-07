@@ -151,7 +151,8 @@ RAM is 4 GB, not the largest Podroid offers: guest memory never returns to Andro
 driver), so after any heavy disk IO the whole guest size is a standing cost to Android. At 8 GB the
 6 Pro was killed during a large `docker load`; 6 GB survived with 140 MB of swap left; 4 GB survived
 on both phones (measurements under "Guest RAM step-down" below). Change it in Podroid > Settings >
-VM resources with the VM stopped (the chips are 512 MB, 1, 2, 4, 6, 8 GB).
+VM resources with the VM stopped. First `adb shell touch /data/local/tmp/podroid-watchdog.pause` so the
+watchdog does not restart the VM under you, and remove the file afterwards (the chips are 512 MB, 1, 2, 4, 6, 8 GB).
 
 ## Pixel 7 rebuilt from a factory reset (2026-11-06)
 
@@ -457,3 +458,24 @@ logging client timeouts for clarke clients from now on.
   baidu answers in 150 ms. The box firewall is Docker-only, derper listens on *:443, *:80, UDP 3478.
 - The DO box could not be reached from the laptop on clarke: public port 22 times out from China,
   Tailscale SSH refuses root by policy (any other OS user is allowed, user unknown).
+
+## Podroid watchdog (2026-11-07)
+
+Podroid never restarts its VM after Android kills the app (its only automatic start is
+`autostart_on_boot`; checked in the v1.2.9 APK). `phone/podroid-watchdog` runs on the phone as adb's
+shell user, `setsid nohup`-detached by `bin/phone-provision` step 3:
+
+- Every 30 s it reads the guest's ssh banner through `127.0.0.1:9922` (`sleep 2 | nc`: nc needs its
+  input held open for the banner to arrive). After 3 misses it fires `START_VM` and waits 120 s.
+- The shell user runs at `oom_score_adj -1000`, so lmkd leaves it alone. It survives adb disconnects.
+  A phone reboot ends it; Podroid's boot autostart brings the VM back, and the next provisioner run
+  over adb starts the watchdog again.
+- Log `/data/local/tmp/podroid-watchdog.log`, pid `/data/local/tmp/podroid-watchdog.pid`. Pause with
+  `/data/local/tmp/podroid-watchdog.pause`.
+- Tested on the Pixel 7: `am force-stop com.excp.podroid` at 19:23:36, `START_VM` at 19:24:56, guest
+  ssh back at 111 s with traefik up and the tailnet ping to Dokploy working.
+
+Found while re-running the provisioner over the tailnet: step 1 looked up installed versions through
+the phone's USB serial, found nothing, and reinstalled Tailscale over the tailnet. That restarted
+Tailscale and dropped adb mid-install. Fixed: lookups use the adb target. Always-on VPN brought
+Tailscale straight back after the forced restart.

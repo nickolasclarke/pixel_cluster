@@ -4,7 +4,8 @@
 # before acting, so re-run after a manual step and it continues.
 #
 # Usage: bin/phone-provision <adb-serial | host:port> [--reinstall]
-#   --reinstall   reinstall both APKs even if already present (upgrade path)
+#   --reinstall   reinstall both APKs even if already present (upgrade path). Over the tailnet this
+#                 restarts Tailscale and drops adb mid-install: use USB or the phone's LAN address.
 #
 # Manual steps it will stop and ask for: Podroid's first-run wizard (device-specific taps),
 # and removing a screen lock if one is set (needs the PIN/pattern; see docs/runbook.md §1).
@@ -15,8 +16,8 @@ cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091
 source bin/lib.sh
 
-REINSTALL=0; SERIAL=""
-for a in "$@"; do case "$a" in --reinstall) REINSTALL=1 ;; -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) SERIAL=$a ;; esac; done
+REINSTALL=0; SERIAL=""; APK_DIR=${APK_DIR:-apks}
+for a in "$@"; do case "$a" in --reinstall) REINSTALL=1 ;; -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) SERIAL=$a ;; esac; done
 [ -n "$SERIAL" ] || die "usage: bin/phone-provision <adb-serial | host:port>"
 adb -s "$SERIAL" get-state >/dev/null 2>&1 || die "adb cannot see $SERIAL (unauthorized, unplugged, or not connected over the network?)"
 ADB_TARGET=$SERIAL; SERIAL=$(adb_real_serial "$ADB_TARGET"); [ -n "$SERIAL" ] || die "cannot read the phone's serial via $ADB_TARGET"
@@ -32,10 +33,10 @@ step() { echo "== $*"; log "$*"; }
 step "1 apks ($MODEL, node name $NAME)"
 while read -r app pkg <&3; do
   pin=$(cat "pins/$app.version" 2>/dev/null) || die "no pins/$app.version (run bin/apk-fetch)"
-  apk=$(find apks -maxdepth 1 -iname "${app}*${pin#v}*.apk" -printf '%f\n' | head -1); [ -n "$apk" ] || die "no $app $pin APK in apks/ (run bin/apk-fetch)"
-  if [ "$REINSTALL" = 1 ] || [ -z "$(adb_installed_version "$SERIAL" "$pkg")" ]; then
-    if adb -s "$ADB_TARGET" install -r "apks/$apk" >>"$LOG_FILE" 2>&1; then echo "   installed $apk"; else die "adb install $apk failed (see $LOG_FILE)"; fi
-  else echo "   $pkg already installed (versionCode $(adb_installed_version "$SERIAL" "$pkg"))"; fi
+  apk=$(find "$APK_DIR" -maxdepth 1 -iname "${app}*${pin#v}*.apk" -printf '%f\n' | head -1); [ -n "$apk" ] || die "no $app $pin APK in $APK_DIR/ (run bin/apk-fetch)"
+  if [ "$REINSTALL" = 1 ] || [ -z "$(adb_installed_version "$ADB_TARGET" "$pkg")" ]; then
+    if adb -s "$ADB_TARGET" install -r "$APK_DIR/$apk" >>"$LOG_FILE" 2>&1; then echo "   installed $apk"; else die "adb install $apk failed (see $LOG_FILE)"; fi
+  else echo "   $pkg already installed (versionCode $(adb_installed_version "$ADB_TARGET" "$pkg"))"; fi
 done 3< pins/packages
 
 # 2. Phone settings (all idempotent) -------------------------------------------------------
@@ -61,7 +62,7 @@ adb -s "$ADB_TARGET" shell settings put system screen_brightness 1
 if [ "$(adb -s "$ADB_TARGET" shell locksettings get-disabled | tr -d '\r')" != "true" ]; then
   adb -s "$ADB_TARGET" shell locksettings set-disabled true >>"$LOG_FILE" 2>&1 || true
   [ "$(adb -s "$ADB_TARGET" shell locksettings get-disabled | tr -d '\r')" = "true" ] || \
-    echo "   NOTE: a PIN/pattern is set; clear it once with: adb -s $SERIAL shell locksettings clear --old <PIN>"
+    echo "   NOTE: a PIN/pattern is set; clear it once with: adb -s $ADB_TARGET shell locksettings clear --old <PIN>"
 fi
 # charge to 80 % only: the phone lives on power (Battery > Battery health > Charging optimization)
 adb -s "$ADB_TARGET" shell settings put secure charge_optimization_mode 1
@@ -89,6 +90,18 @@ MSG
   exit 2
 fi
 echo "   dropbear answering (adb forward $LOCAL_PORT -> 9922)"
+# Podroid does not restart its VM after Android kills the app; phone/podroid-watchdog does (runbook).
+# It runs detached as adb's shell user and is lost on a phone reboot, so every run re-checks it.
+WD=/data/local/tmp/podroid-watchdog
+if [ "$(adb -s "$ADB_TARGET" shell "md5sum $WD 2>/dev/null" | cut -d' ' -f1)" != "$(md5sum < phone/podroid-watchdog | cut -d' ' -f1)" ] \
+   || ! adb -s "$ADB_TARGET" shell "kill -0 \$(cat $WD.pid 2>/dev/null) 2>/dev/null"; then
+  adb -s "$ADB_TARGET" shell "kill \$(cat $WD.pid 2>/dev/null) 2>/dev/null" || true
+  adb -s "$ADB_TARGET" push phone/podroid-watchdog "$WD" >>"$LOG_FILE"
+  adb -s "$ADB_TARGET" shell "setsid nohup sh $WD </dev/null >/dev/null 2>&1 &"
+  sleep 2
+fi
+adb -s "$ADB_TARGET" shell "kill -0 \$(cat $WD.pid 2>/dev/null) 2>/dev/null" || die "podroid-watchdog did not start on the phone (see $LOG_FILE)"
+echo "   podroid-watchdog running (restarts the VM if Android kills Podroid)"
 
 # 4. Guest shell access: operator key, else first-boot password --------------------------------
 SSH_OPTS=(-p "$LOCAL_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)

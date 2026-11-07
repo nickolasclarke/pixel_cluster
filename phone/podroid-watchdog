@@ -1,0 +1,32 @@
+#!/system/bin/sh
+# podroid-watchdog — runs on the phone as adb's shell user (started detached by bin/phone-provision).
+# Android can kill Podroid outright (MemoryLimiter, lmkd) and Podroid does not restart its VM; its only
+# automatic start is on boot. This probes the guest's ssh banner through Podroid's 127.0.0.1:9922
+# forward every WATCHDOG_INTERVAL seconds and, after WATCHDOG_FAILS consecutive misses, fires
+# START_VM, then waits WATCHDOG_GRACE seconds for the boot. The shell user's oom_score_adj is -1000,
+# so lmkd does not kill this loop; a phone reboot does, and Podroid's own boot autostart covers that.
+# Touch WATCHDOG_PAUSE to stop it acting while the VM is down on purpose (e.g. a RAM change).
+INTERVAL=${WATCHDOG_INTERVAL:-30}
+LIMIT=${WATCHDOG_FAILS:-3}
+GRACE=${WATCHDOG_GRACE:-120}
+PAUSE=${WATCHDOG_PAUSE:-/data/local/tmp/podroid-watchdog.pause}
+LOG=${WATCHDOG_LOG:-/data/local/tmp/podroid-watchdog.log}
+echo $$ > "${WATCHDOG_PIDFILE:-/data/local/tmp/podroid-watchdog.pid}"
+vm_answers() { # nc needs its input held open for the banner to arrive
+  [ "$(sleep 2 | timeout 4 nc 127.0.0.1 9922 2>/dev/null | head -c 4)" = "SSH-" ]
+}
+misses=0
+while :; do
+  if [ -e "$PAUSE" ] || vm_answers; then
+    misses=0
+  else
+    misses=$((misses + 1))
+    if [ "$misses" -ge "$LIMIT" ]; then
+      misses=0
+      echo "$(date '+%F %T') VM not answering on 9922 after $LIMIT checks; START_VM" >> "$LOG"
+      am start -a com.excp.podroid.action.START_VM >/dev/null 2>&1
+      sleep "$GRACE"
+    fi
+  fi
+  sleep "$INTERVAL"
+done
