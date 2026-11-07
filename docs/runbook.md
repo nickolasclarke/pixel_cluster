@@ -549,3 +549,23 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
 - A stdlib helper for signed Aliyun API calls lives in the session scratchpad (`aliyun_api.py`,
   reads the key from ~/.config/pixel_cluster/aliyun-access-key-*); to be moved into headscale-cn
   `commands/` once the next step is settled.
+
+### Decision: peer relays do not fix cross-border reach; stand up a Hong Kong relay (2026-11-07 night)
+
+- **Peer relays ruled out for this problem.** Tailscale's docs state DERP still handles connection
+  negotiation and peer relays are a path between two nodes that both have the grant; a node reaches a
+  peer by sending disco over the peer's home DERP. Mainland nodes home on cn, which nothing outside
+  China can reach, so a US client can never start the negotiation. headscale 0.29.5 (running on DO)
+  does support peer relays (issue #3256 fixed in 0.29), so they remain an option for throughput once
+  a common DERP exists, not a substitute for one.
+- **Aliyun box inventory (for rebuilding elsewhere):** Debian 12, kernel 6.1, derper 1.98.5 at
+  /usr/local/bin/derper as a systemd unit (user derper, CAP_NET_BIND_SERVICE, hardened), flags
+  `-c /var/lib/derper/derper.key -hostname=47.108.180.69 -a=:443 -certmode=manual
+  -certdir=/srv/derp/certs -stun -stun-port=3478 -http-port=80`, no verify-client (the box cannot
+  reach hs.nclar.ke). Self-signed cert CN=IP with IP SAN, 10 years (gen-relay-cert.sh), pinned in
+  derp.yaml as sha256-raw. Docker and containerd also run but derper is native.
+- **Hong Kong plan choice:** cheapest Simple Application Server plans in cn-hongkong are USD 3.5-6
+  a month. Prefer a "BGP" (NORMAL) line over "BGP_NCO" (INTERNATIONAL): NCO lines are the ones
+  marketed for non-mainland traffic, and mainland reachability is the whole point. Candidate:
+  swas.s.c2m05s20b1.linux, 2 vCPU, 0.5 GiB, 20 GB, 200 Mbps BGP, USD 4/month. derper needs well under
+  100 MB of RAM.
