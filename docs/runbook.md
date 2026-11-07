@@ -233,6 +233,28 @@ Also noted: with `adb tcpip 5555` adbd listens on every interface (`*:5555`), as
 forwards (8080, 8443, 9922, 30000-30009), so they are reachable from whatever Wi-Fi the phone is on.
 Accepted for now; the Android app's tailnet address is the intended path.
 
+## Docker image store: overlay2, not containerd (2026-11-06)
+
+Docker 29 on the guest defaults to the containerd image store (`overlayfs` snapshotter). On the
+Podroid guest (kernel 7.1.5, containerd 2.3.5) it unpacks hard-linked files as empty: the
+hermes-agent arm64 image came out with 4979 zero-byte `.py` files, every one with more than one
+link. The layer blob itself was intact (checksum matched and a manual `tar -xzf` of it on the same
+disk was correct). The provisioner now writes `{"features": {"containerd-snapshotter": false}}`
+to `/etc/docker/daemon.json` (merged into any existing keys) and restarts Docker; `docker info`
+then shows `Storage Driver: overlay2`.
+
+Switching stores hides every image *and container* of the old store, including Dokploy's
+`dokploy-traefik`. `server.validate` then still says `isMainDirectoryInstalled:true` but
+`traefik.enabled:false`, so step 7 now re-runs Dokploy setup unless both are true.
+
+Docker Hub from a phone on a China-adjacent network: small pulls (traefik, 178 MB) work, but large
+blobs get `connection reset by peer` from the CloudFront CDN (52.85.151.x) partway through, five
+retries in a row, so a 1 GB layer never lands. Dokploy's setup reports `done` even when its traefik
+pull failed this way; check `traefik.enabled` in validate, not the deployment status. Workaround
+used: pull on a machine with clean egress (`docker pull --platform linux/arm64 ...`) and stream it
+in with `docker save | ssh -p 2222 root@<guest> docker load`. A registry mirror would be the
+durable fix if phones are going to deploy large images from that network.
+
 ## Screen off and Doze (tested 2026-11-06)
 
 With Podroid on the deviceidle whitelist plus `RUN_ANY_IN_BACKGROUND`/`RUN_IN_BACKGROUND` allowed,
