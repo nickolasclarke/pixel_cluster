@@ -604,3 +604,9 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
   reaches the Pixel 7 guest (874 ms, direct via the US WG exit 135.180.36.137:41641) and the laptop
   (227 ms, direct via 135.180.36.137:10937). The Pixel 7 Android node gets no reply: its only path is
   its home relay cn, which DO cannot reach. All three still report `relay=cn` as home.
+- **Mainland WAN test by Nick (00:24 CST, laptop on SUN 192.168.1.61, WG off, exit 61.159.245.68):**
+  netcheck UDP true, UPnP available on SUN, cn 25 ms, do 210.8 ms, every Tailscale-hosted region
+  reachable at 221-421 ms (lax/sfo 221, tok 320, hkg 421). Pings: both Pixel 7 nodes direct via the
+  clarke router WAN 192.168.1.64 (10 ms Android, 433 ms guest), dokploy direct via 165.22.145.26:41641
+  at 191 ms. dokploy now homes on do; all mainland nodes still home on cn. So mainland to DO direct
+  UDP works and the do region costs 185 ms more than cn for anything relayed.
