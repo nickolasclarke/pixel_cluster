@@ -610,3 +610,16 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
   clarke router WAN 192.168.1.64 (10 ms Android, 433 ms guest), dokploy direct via 165.22.145.26:41641
   at 191 ms. dokploy now homes on do; all mainland nodes still home on cn. So mainland to DO direct
   UDP works and the do region costs 185 ms more than cn for anything relayed.
+- **China Mobile hotspot test by Nick (00:33 CST, laptop, no VPN, exit 117.136.73.162):** UDP true but
+  `MappingVariesByDestIP: true` (symmetric NAT), no port mapping. cn 58.7 ms, hkg 82.7, sin 111,
+  tok 128, sfo 231, do 259.6. No direct path to anything: Pixel 7 guest via DERP(cn) 395-541 ms,
+  Pixel 7 Android via DERP(cn) 258-944 ms, dokploy via DERP(do) 235-274 ms. The on-the-go mainland
+  case is relay-only, so the phones' home relay decides its latency. Note the carrier difference:
+  Hong Kong is 83 ms from China Mobile cellular but 370-420 ms from the China Telecom home line.
+- **Decision 2026-11-08: do not set Avoid on cn.** With it, mainland cellular to the home phones
+  would relay via San Francisco (about 260 + 210 ms each way) instead of cn. Region do stays as the
+  shared relay for nodes outside the mainland (dokploy homes there) and for direct-path discovery,
+  which already lets DO reach both guests. Relay-only clients abroad still cannot reach nodes homed
+  on cn; the one-line toggle for a trip is `avoid: true` on region 900 in derp.yaml, set before
+  leaving and reverted on return. The structural fix is IPv6 at home (headscale-cn future-work #1),
+  which would give direct paths from cellular and from abroad and make the home-relay choice moot.
