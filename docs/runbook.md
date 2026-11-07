@@ -402,3 +402,37 @@ Findings:
 Not changed: headscale, relay, routers, firewall, phones (the screen-on test never ran: adb
 dropped when the laptop left clarke). Probe scripts are in the session scratchpad, to be moved
 into `bin/` once the test matrix settles.
+
+### Third pass (2026-11-07 evening): the clarke router was underpowered
+
+Nick found the clarke GL router (LAN MAC OUI 94:83:c4, GL.iNet) was underpowered and fixed it.
+Everything below was measured after the laptop rejoined clarke at 18:24.
+
+1. **The Pixel 7 lost Wi-Fi at 16:10:35 and had none until 18:10** (`dumpsys wifi` state records,
+   `NETWORK_DISCONNECTION_EVENT reasonCode -1 locallyGenerated false`, i.e. the AP went away). It
+   dropped again 18:12:19 and rejoined at 18:29. The laptop's own flap was 16:07. The 16:09 Wi-Fi-only
+   stalls (second pass, finding 2) happened while the AP was dying, so they say nothing about the
+   radios. Across the day the "clarke" SSID appeared under four locally-administered BSSIDs
+   (0a:21:37:2d:c1:e9, 9e:9a:24:e6:d3:e2, ae:9a:4f:fc:f4:35, 0e:79:fd:f3:9c:e4); two are up now, both
+   on channel 44.
+2. **Wi-Fi-only plain TCP now completes 300 MB both ways, screen on and screen off**, laptop to
+   Pixel 7 Android (`natpath.py`, 18:48-18:50): 9.3 and 10.2 MB/s with the screen held on, 11.5 and
+   10.4 MB/s dozing. Second-pass finding 2 is withdrawn: there is no Wi-Fi bulk-flow stall when the
+   AP is healthy. Screen-off power saving does not stall bulk TCP.
+3. **The 300 MB ssh transfer to the Pixel 7 guest now completes 4 of 4** (`xfer-probe2.sh`, screen
+   off, 18:50-18:55): 49, 45, 44, 36 s at 6.2-8.5 MB/s, ssh exit 0, direct path via the Android NAT
+   (192.168.15.141:20310) for the whole run, relay never used. Some retransmits (about 100 per run on
+   the laptop's ssh socket) but no stall. Before the power fix it was 0 of 7.
+4. **The guest's relay socket is healthy** (ESTAB to 47.108.180.69, last receive 1.6 s ago) and the
+   guest's tailscaled log shows the usual rehoming churn only at 18:29 when its Wi-Fi came back.
+5. **v2rayA (from the nft ruleset Nick captured at about 18:30):** no proxy or tproxy rules exist and
+   `v2raya_core` is not running, only the `v2raya` manager. The ruleset is clean: Docker, lxc and
+   tailscaled's own tables. This does not settle the 14:50 relay dial failure, which happened under a
+   different state (SUN-5G, WG up, proxy state unknown). To settle it, capture the ruleset while the
+   proxy core and WG are both up.
+
+Working conclusion: the underpowered router is the simplest explanation for both problems in the
+handoff. An AP that browns out under sustained traffic drops bulk flows mid-transfer, and each drop
+also kills the guests' relay TCP sessions, which is the zombie-socket pattern the derper logs. Still
+to confirm: that no failures recur over a longer series and on the 6 Pro, and that the derper stops
+logging client timeouts for clarke clients from now on.
