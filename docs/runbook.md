@@ -600,3 +600,7 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
   Dokploy mounts update + compose update + compose deploy (container recreated, so no manual restart
   needed this time). Health `pass`, `/derp/probe` 200, logs show the region and STUN started.
 - Laptop netcheck now lists do at 207 ms (via the WG, same as sfo); cn 24.7 ms stays nearest.
+- **First cross-border test with region do up (00:15 CST):** from the DO box, `tailscale ping`
+  reaches the Pixel 7 guest (874 ms, direct via the US WG exit 135.180.36.137:41641) and the laptop
+  (227 ms, direct via 135.180.36.137:10937). The Pixel 7 Android node gets no reply: its only path is
+  its home relay cn, which DO cannot reach. All three still report `relay=cn` as home.
