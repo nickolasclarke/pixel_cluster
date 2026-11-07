@@ -345,3 +345,7 @@ guest) sometimes stayed dead. Findings, in the order they matter:
 
 Throughput (300 MB of zeros over ssh, with the old keepalive): laptop -> Android tailnet 20 MB/s;
 laptop -> guest tailnet 1.4-6.4 MB/s, often dropped.
+After the keepalive fix, with the laptop back on clarke: 0 tailscaled restarts, but 6/6 transfers
+still dropped (58-170 s, 1.8-5.2 MB/s), screen on or off. The laptop's log shows the guest's path
+going derp/direct every 20-30 s during each transfer. Investigation handed off in
+`docs/handoffs/2026-11-07-tailnet-relay-and-bulk-transfers.md`.
