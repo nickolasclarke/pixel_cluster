@@ -441,3 +441,19 @@ logging client timeouts for clarke clients from now on.
    Android NAT (192.168.15.168:22356) throughout. Guest load rose to 2.7 during the runs; RAM unchanged.
    Nick confirms the 18:xx Wi-Fi events were him fixing the router's power supply, so every failure in
    this investigation predates the fix and every pass follows it.
+
+### Aliyun relay reachability from outside China (2026-11-07 evening, read-only)
+
+- The 2026-06-30 design spec already tested the handoff's "open the relay to all sources" option:
+  with the security group open to 0.0.0.0/0 on 22/80/443, about 30 non-China vantage points still
+  timed out on every port. It concluded the block is at the platform/border, not the security group.
+- Today's derper log (7 days) shows only three client sources: the two China exits (61.159.245.68,
+  116.54.18.215) and, once, the DO box 165.22.145.26: `client [LHMYf]` at 00:24:53 CST, ending in
+  `read: connection timed out`. So the DO box did complete a TLS session with the relay at least once,
+  which means inbound from outside China is throttled or intermittent rather than hard-blocked.
+  derper only logs errors, so how long that session lived and how often DO gets in is unknown; the
+  DO box's tailscaled log would say.
+- From the Aliyun box, egress to the DO box (22 and 443), hs.nclar.ke and 1.1.1.1 all time out;
+  baidu answers in 150 ms. The box firewall is Docker-only, derper listens on *:443, *:80, UDP 3478.
+- The DO box could not be reached from the laptop on clarke: public port 22 times out from China,
+  Tailscale SSH refuses root by policy (any other OS user is allowed, user unknown).
