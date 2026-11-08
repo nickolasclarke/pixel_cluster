@@ -642,9 +642,12 @@ until 09:13; the idle:sleep inhibitor does not stop a lid-close suspend). 27 rou
 - The guest → box direct path is slow: most pings took 240-940 ms and 8 of the Pixel 7's took over
   a second (logged as "1"/"2" before the parser learned that `tailscale ping` prints Go durations,
   e.g. `in 1.234s`).
-- The guest's STUN endpoints alternate between 61.159.245.68 (China exit) and 135.180.36.137 (the
-  router's WireGuard exit), and it adds a derp-2 (sfo) connection for the box: the guest's traffic
-  leaves through two different exits. Not chased here; it belongs to the relay/network handoff.
+- The guests have two public exits at once, by destination: every endpoint update in both guests'
+  tailscaled logs (11/07 04:58 UTC onward, before and after the router's geo split) lists STUN
+  results from both 61.159.245.68 (China exit) and 135.180.36.137 (the router's WireGuard exit).
+  The DO box is abroad, so the guest → box path goes out through the WireGuard exit, which fits the
+  slow pings below; the box's DERP for the guests is derp-2 (sfo). Sent to the headscale-cn sessions
+  (relay/network handoff); not chased here.
 - The first summary showed 4 tailscaled restarts on the Pixel 7; they were two rounds where `pidof`
   listed a short-lived second tailscaled next to the daemon (pid 995 all night). Fixed in the summary.
 
