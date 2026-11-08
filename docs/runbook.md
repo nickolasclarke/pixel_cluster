@@ -646,8 +646,18 @@ until 09:13; the idle:sleep inhibitor does not stop a lid-close suspend). 27 rou
   tailscaled logs (11/07 04:58 UTC onward, before and after the router's geo split) lists STUN
   results from both 61.159.245.68 (China exit) and 135.180.36.137 (the router's WireGuard exit).
   The DO box is abroad, so the guest → box path goes out through the WireGuard exit, which fits the
-  slow pings below; the box's DERP for the guests is derp-2 (sfo). Sent to the headscale-cn sessions
-  (relay/network handoff); not chased here.
+  slow pings below; the box's DERP for the guests is derp-2 (sfo). headscale-cn-89 confirmed this
+  is clarke's design: the cn relay and (since 2026-11-07 night) mainland IPs leave the native China
+  WAN, everything else the US WireGuard tunnel. Guest → DO is China → US WG endpoint → DO; the
+  240-940 ms and the timeouts are that double hop plus the tunnel's loss, which predates the geo split
+  (headscale-cn docs/clarke-geo-split-runbook.md).
+- Guest DNS must end at the router (192.168.15.1): a mainland resolver queried directly returns
+  GFW-poisoned answers for non-China names. Checked 2026-11-08, both guests: `tailscale up
+  --accept-dns=false`, resolv.conf is the Android tether gateway, and Android resolves via Wi-Fi DNS
+  192.168.15.1 or Tailscale MagicDNS. Headscale has no global nameservers and
+  `override_local_dns: false`, so MagicDNS falls back to the phone's own resolver, 192.168.15.1. Docker
+  inherits the guest's resolv.conf. Answers: github.com 140.82.116.3, registry-1.docker.io AWS,
+  mirrors.aliyun.com 182.242.90.2 (mainland), as the router's geo split intends.
 - The first summary showed 4 tailscaled restarts on the Pixel 7; they were two rounds where `pidof`
   listed a short-lived second tailscaled next to the daemon (pid 995 all night). Fixed in the summary.
 
