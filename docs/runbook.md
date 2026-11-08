@@ -623,3 +623,29 @@ failed once for the Pixel 7 and passed on the next three calls, 9-13 s each.
   on cn; the one-line toggle for a trip is `avoid: true` on region 900 in derp.yaml, set before
   leaving and reverted on return. The structural fix is IPv6 at home (headscale-cn future-work #1),
   which would give direct paths from cellular and from abroad and make the home-relay choice moot.
+
+First night (2026-11-07 22:48 to 2026-11-08 01:10, then the lid closed and the laptop suspended
+until 09:13; the idle:sleep inhibitor does not stop a lid-close suspend). 27 rounds per phone:
+
+| | Pixel 7 | 6 Pro |
+|---|---|---|
+| Guest ssh from the laptop | 27/27 | 27/27 |
+| Android tailnet pong | 27/27 | 27/27 |
+| Dokploy validate ready | 21/27 | 25/27 |
+| Guest → box ping, direct / timeout | 23 / 4 | 25 / 2 |
+| VM, tailscaled, watchdog restarts | 0, 0, 0 | 0, 0, 0 |
+| LAN ping, screen off, median / max | 160 / 340 ms | 164 / 389 ms |
+
+- Every validate failure was the API call failing, not "not ready"; the soak now records the HTTP
+  code (`error-000`: the laptop got no answer from the Dokploy API; 5xx: Dokploy could not reach the
+  guest). Ten back-to-back validates at 09:15 all returned 200 in 7-11 s.
+- The guest → box direct path is slow: most pings took 240-940 ms and 8 of the Pixel 7's took over
+  a second (logged as "1"/"2" before the parser learned that `tailscale ping` prints Go durations,
+  e.g. `in 1.234s`).
+- The guest's STUN endpoints alternate between 61.159.245.68 (China exit) and 135.180.36.137 (the
+  router's WireGuard exit), and it adds a derp-2 (sfo) connection for the box: the guest's traffic
+  leaves through two different exits. Not chased here; it belongs to the relay/network handoff.
+- The first summary showed 4 tailscaled restarts on the Pixel 7; they were two rounds where `pidof`
+  listed a short-lived second tailscaled next to the daemon (pid 995 all night). Fixed in the summary.
+
+Second run, with those fixes: `~/.local/state/pixel_cluster/soak-20261108.tsv`, from 09:19.

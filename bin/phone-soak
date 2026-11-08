@@ -24,7 +24,7 @@ field() { # <key> <key=value lines> → value, or "-"
 }
 
 probe_phone() { # <guest node name> <tailscale status json> <dokploy servers json> <laptop_gw> → one TSV line
-  local name=$1 ts=$2 servers=$3 gw=$4 android aip gip target ph g lan sid v dk a_ms a_path g_ms g_path b_ms b_path
+  local name=$1 ts=$2 servers=$3 gw=$4 android aip gip target ph g lan sid dk a_ms a_path g_ms g_path b_ms b_path
   android=${name%-podroid}
   aip=$(node_ip_by_hostname "$ts" "$android" 2>/dev/null); gip=$(node_ip_by_hostname "$ts" "$name" 2>/dev/null)
   target="$aip:5555"
@@ -43,10 +43,7 @@ probe_phone() { # <guest node name> <tailscale status json> <dokploy servers jso
     echo load=\$(cut -d' ' -f1 /proc/loadavg)
     tailscale ping -c 1 --timeout 5s $DOKPLOY_BOX_IP 2>&1" 2>/dev/null)
   sid=$(find_server_id "$servers" "$name")
-  # validate makes the Dokploy box ssh into the guest; error = the call itself failed (curl -f / timeout)
-  if [ -z "$sid" ]; then dk=noserver
-  elif ! v=$(dk_get "server.validate?serverId=$sid"); then dk=error
-  elif dokploy_server_ready "$v"; then dk=ready; else dk=notready; fi
+  if [ -z "$sid" ]; then dk=noserver; else dk=$(dokploy_validate_state "$sid"); fi
   read -r a_ms a_path <<< "$(ts_ping_result "$(timeout 10 tailscale ping -c 1 --timeout 5s "$aip" 2>&1)")"
   read -r g_ms g_path <<< "$(ts_ping_result "$(timeout 10 tailscale ping -c 1 --timeout 5s "$gip" 2>&1)")"
   read -r b_ms b_path <<< "$(ts_ping_result "$g")"
@@ -103,10 +100,13 @@ for phone in dict.fromkeys(r["phone"] for r in rows):
     vm = tsd = wd = 0; last_up = last_pid = last_wd = None
     for r in rs:
         up = num(r["uptime_s"])
+        pids = r["tailscaled_pid"].split()
         if up is not None:
             if last_up is not None and up < last_up: vm += 1
-            elif last_pid is not None and r["tailscaled_pid"] != last_pid: tsd += 1
-            last_up, last_pid = up, r["tailscaled_pid"]
+            elif last_pid is not None and last_pid not in pids: tsd += 1
+            # pidof can list a short-lived second tailscaled next to the daemon (newest first); the
+            # daemon is the previous pid while it is still listed, else the oldest
+            last_up, last_pid = up, (last_pid if last_pid in pids else (pids[-1] if pids else None))
         w = num(r["wd_restarts"])
         if w is not None:
             if last_wd is not None and w > last_wd: wd += int(w - last_wd)

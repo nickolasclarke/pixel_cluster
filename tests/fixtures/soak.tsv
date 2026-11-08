@@ -5,3 +5,5 @@ time	phone	laptop_gw	screen	lan_ms	android_ms	android_path	guest_ms	guest_path	s
 2026-11-07T23:15:00	pixel-7-podroid	ok	Dozing	700	-	timeout	160	derp	ok	350	800	3000	0.15	42	derp	2900	dead	2	ready
 2026-11-07T23:30:00	pixel-7-podroid	down	Dozing	-	-	timeout	-	timeout	fail	-	-	-	-	-	timeout	2900	alive	2	fail
 2026-11-07T23:00:00	pixel-6-pro-podroid	ok	Dozing	50	60	direct	59	derp	ok	9000	42	5900	1.00	30	direct	6000	alive	0	ready
+2026-11-07T23:05:00	pixel-6-pro-podroid	ok	Dozing	50	60	direct	59	derp	ok	9300	21058 42	5900	1.00	30	direct	6000	alive	0	error-000
+2026-11-07T23:10:00	pixel-6-pro-podroid	ok	Dozing	50	60	direct	59	derp	ok	9600	42	5900	1.00	30	direct	6000	alive	0	ready

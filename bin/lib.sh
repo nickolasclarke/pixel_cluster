@@ -183,6 +183,14 @@ d.setdefault("features", {})["containerd-snapshotter"] = False
 print(json.dumps(d))' "$1"
 }
 
+dokploy_validate_state() { # <serverId> → ready|notready|error-<http code>; validate makes the Dokploy
+  # box ssh into the guest. error-000: the laptop got no answer from the API; 5xx: Dokploy failed.
+  local body code; body=$(mktemp)
+  code=$(curl -s -m 90 -o "$body" -w '%{http_code}' -H "x-api-key: $(dokploy_token)" "$DOKPLOY_URL/api/server.validate?serverId=$1")
+  if [ "$code" != 200 ]; then echo "error-${code:-000}"
+  elif dokploy_server_ready "$(cat "$body")"; then echo ready; else echo notready; fi
+  rm -f "$body"
+}
 dokploy_server_ready() { # <server.validate JSON> -> 0 when Dokploy's main directory and traefik are both up
   echo "$1" | grep -q '"isMainDirectoryInstalled":true' && echo "$1" | grep -q '"traefik":{"version":"[0-9.]*","enabled":true}'
 }
@@ -190,8 +198,10 @@ dokploy_server_ready() { # <server.validate JSON> -> 0 when Dokploy's main direc
 # --- phone-soak probe parsers ---
 ts_ping_result() { # <tailscale ping output> → "<ms> direct|derp", or "- timeout" when no pong came back
   # (tailscale ping exits 1 on a relayed pong too, so the text is the only reliable signal)
-  printf '%s\n' "$1" | awk '/^pong from/ { for (i = 1; i <= NF; i++) if ($i == "in") ms = $(i + 1)
-      sub(/ms$/, "", ms); printf "%.0f %s\n", ms, ($0 ~ / via DERP\(/ ? "derp" : "direct"); found = 1; exit }
+  # the latency is a Go duration: "850µs", "163ms", "1.234s", "2s"
+  printf '%s\n' "$1" | awk '/^pong from/ { for (i = 1; i <= NF; i++) if ($i == "in") d = $(i + 1)
+      if (d ~ /ms$/) ms = d + 0; else if (d ~ /(µs|us)$/) ms = (d + 0) / 1000; else ms = (d + 0) * 1000
+      printf "%.0f %s\n", ms, ($0 ~ / via DERP\(/ ? "derp" : "direct"); found = 1; exit }
     END { if (!found) print "- timeout" }'
 }
 ping_avg_ms() { # <iputils ping output> → average rtt rounded to ms, or "-" when every packet was lost
