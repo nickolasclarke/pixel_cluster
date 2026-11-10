@@ -662,3 +662,29 @@ until 09:13; the idle:sleep inhibitor does not stop a lid-close suspend). 27 rou
   listed a short-lived second tailscaled next to the daemon (pid 995 all night). Fixed in the summary.
 
 Second run, with those fixes: `~/.local/state/pixel_cluster/soak-20261108.tsv`, from 09:19.
+
+## Upgrading Podroid (2026-11-10, 1.2.9 -> 1.3.0)
+
+`bin/apk-fetch --app podroid`, then per phone `bin/podroid-upgrade <adb target> --backup-volumes
+~/phone-backups/volumes`. The Pixel 7 first (nothing important on it), then the 6 Pro.
+
+- **Why a script:** `adb install -r` over a running VM kills it, and Podroid's own stop (the
+  `STOP_VM` broadcast, or the button) only asks the guest to `sync` for up to 8 s and then kills the
+  VM (`AvfEngine.stop`). Neither lets docker stop containers. The script pauses the watchdog, runs
+  `rc-service docker stop` in the guest, optionally tars `/var/lib/docker/volumes` to the laptop,
+  stops the VM, installs, starts the VM, and compares kernel, containers and Dokploy's
+  `server.validate` with before. Containers stopped by the daemon (not by `docker stop`) come back on
+  boot through their restart policy.
+- **Data survives:** an update keeps the VM disk. The guest is a read-only squashfs (replaced on
+  update) under a persistent ext4 upper, so our changes (`apk add tailscale`, sshd, daemon.json,
+  cron) stay. A file we edited that a release also changes keeps our version: before upgrading,
+  compare the release's changed `build-rootfs/files/` paths with `/mnt/persist/upper` in the guest.
+  For 1.3.0, neither guest shadowed any of them.
+- **STOP_VM needs the receiver named:** `am broadcast -a com.excp.podroid.action.STOP_VM -n
+  com.excp.podroid/.service.VmControlReceiver`. `adb shell content call --uri
+  content://com.excp.podroid.control --method state` reports `vm=running|stopped` and `vc=<versionCode>`.
+- **Downloads:** GitHub's release CDN throttles each connection from here (25-45 KB/s), so
+  `apk-fetch` downloads in 16 parallel ranges: 325 MB in 14 min instead of about 11 hours.
+- **Result:** both phones `vc=34`, AVF backend, kernel 7.1.5 -> 7.3.0, all containers back, Dokploy
+  ready, watchdog running and never fired. About 2 min 10 s per phone. The guest answers ssh over adb
+  before its tailscaled rejoins, so the script retries `server.validate` for up to 5 min.
