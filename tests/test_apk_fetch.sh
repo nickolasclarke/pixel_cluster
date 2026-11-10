@@ -25,3 +25,27 @@ for mode in truncated baddigest; do
   assert_eq "" "$(grep -o 'sha256 ok' "$d/out")" "apk-fetch $mode does not claim success"
   rm -rf "$d"
 done
+
+# download_parts (lib.sh): GitHub's release CDN throttles each connection (~25-45 KB/s seen from here),
+# so the APK is fetched as parallel byte ranges. Real curl on a file:// URL; a logging wrapper counts
+# the ranged calls, and a range that fails makes the whole download fail.
+dp_dir=$(mktemp -d); mkdir "$dp_dir/bin"
+head -c 1000003 /dev/urandom > "$dp_dir/src.apk"
+REAL_CURL=$(command -v curl)
+cat > "$dp_dir/bin/curl" <<STUB
+#!/bin/bash
+echo "\$*" >> "$dp_dir/calls"
+for a in "\$@"; do [ "\$a" = "-r" ] && [ -e "$dp_dir/fail_ranges" ] && exit 22; done
+exec "$REAL_CURL" "\$@"
+STUB
+chmod +x "$dp_dir/bin/curl"; : > "$dp_dir/calls"
+(source bin/lib.sh; PATH="$dp_dir/bin:$PATH" download_parts "file://$dp_dir/src.apk" "$dp_dir/out.apk" 4) >/dev/null 2>&1
+assert_eq "$(sha256sum < "$dp_dir/src.apk")" "$(sha256sum < "$dp_dir/out.apk" 2>/dev/null)" \
+  "download_parts reassembles the file byte for byte"
+assert_eq "4" "$(grep -c -- ' -r ' "$dp_dir/calls")" "download_parts fetches the file as the requested number of ranges"
+assert_eq "0" "$(find "$dp_dir" -name 'out.apk.part*' | wc -l)" "download_parts removes its part files"
+touch "$dp_dir/fail_ranges"; rm -f "$dp_dir/out.apk"
+(source bin/lib.sh; PATH="$dp_dir/bin:$PATH" download_parts "file://$dp_dir/src.apk" "$dp_dir/out.apk" 4) >/dev/null 2>&1; rc=$?
+assert_eq "1:no" "$rc:$([ -e "$dp_dir/out.apk" ] && echo yes || echo no)" "download_parts fails and leaves no file when a range fails"
+assert_eq "0" "$(find "$dp_dir" -name 'out.apk.part*' | wc -l)" "download_parts removes its part files after a failure"
+rm -rf "$dp_dir"

@@ -40,7 +40,7 @@ fetch_tailscale() {
   expected=$(curl -fsSL "$url.sha256" | cut -d' ' -f1)
   [ ${#expected} -eq 64 ] || { echo "bad sha256 from $url.sha256" >&2; return 1; }
   log "downloading $url"
-  curl -fL --progress-bar "$url" -o "apks/$asset" || { rm -f "apks/$asset"; echo "download failed: $url" >&2; return 1; }
+  download_parts "$url" "apks/$asset" || { echo "download failed: $url" >&2; return 1; }
   verify_sha256 "apks/$asset" "$expected" || return 1
   echo "$version" > pins/tailscale.version
   echo "tailscale $version -> apks/$asset (sha256 ok)"
@@ -54,7 +54,7 @@ fetch_podroid() {
   if up_to_date podroid "$tag"; then echo "podroid up to date ($tag)"; return; fi
   url="https://github.com/$PODROID_REPO/releases/download/$tag/$asset"
   log "downloading $url"
-  curl -fL --progress-bar "$url" -o "apks/$asset" || { rm -f "apks/$asset"; echo "download failed: $url" >&2; return 1; }
+  download_parts "$url" "apks/$asset" || { echo "download failed: $url" >&2; return 1; }
   verify_sha256 "apks/$asset" "$expected" || return 1
   echo "$tag" > pins/podroid.version
   echo "podroid $tag -> apks/$asset (sha256 ok)"

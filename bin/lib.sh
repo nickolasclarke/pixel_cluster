@@ -38,6 +38,28 @@ sys.exit("no Podroid-*-release.apk asset in release")
 PY
 }
 
+download_parts() { # <url> <out> [parts, default 16] — fetch as parallel byte ranges: GitHub's release
+  # CDN throttles each connection (~25-45 KB/s seen from here), not the total. Falls back to one
+  # stream when the size is unknown. On any failure returns 1 and leaves neither <out> nor parts.
+  local url=$1 out=$2 parts=${3:-16} size chunk i rc=0 pids=()
+  size=$(curl -sfIL "$url" 2>/dev/null | tr -d '\r' | awk 'tolower($1)=="content-length:" {n=$2} END {print n}')
+  if ! [[ "$size" =~ ^[0-9]+$ ]] || [ "$size" -lt "$parts" ]; then
+    curl -fL --retry 3 --progress-bar "$url" -o "$out" || { rm -f "$out"; return 1; }
+    return 0
+  fi
+  chunk=$(( (size + parts - 1) / parts ))
+  for ((i = 0; i < parts; i++)); do
+    curl -sfL --retry 5 -r "$((i * chunk))-$(((i + 1) * chunk - 1))" "$url" -o "$out.part$i" & pids+=($!)
+  done
+  for i in "${pids[@]}"; do wait "$i" || rc=1; done
+  if [ "$rc" = 0 ]; then
+    for ((i = 0; i < parts; i++)); do cat "$out.part$i"; done > "$out" || rc=1
+    [ "$(stat -c %s "$out" 2>/dev/null)" = "$size" ] || rc=1
+  fi
+  for ((i = 0; i < parts; i++)); do rm -f "$out.part$i"; done
+  [ "$rc" = 0 ] || { rm -f "$out"; return 1; }
+}
+
 verify_sha256() { # <file> <expected-hex> — on mismatch deletes the file and returns 1
   local actual
   actual=$(sha256sum "$1" | cut -c1-64)
