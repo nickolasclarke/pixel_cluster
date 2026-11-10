@@ -207,3 +207,11 @@ ts_ping_result() { # <tailscale ping output> → "<ms> direct|derp", or "- timeo
 ping_avg_ms() { # <iputils ping output> → average rtt rounded to ms, or "-" when every packet was lost
   printf '%s\n' "$1" | awk -F/ '/^rtt / { printf "%.0f\n", $5; found = 1 } END { if (!found) print "-" }'
 }
+
+# --- podroid-upgrade helpers ---
+containers_missing() { # <names-before-file> <names-after-file> → names in before that are not in after
+  # A swarm task container comes back with a new task id (<service>.<slot>.<25-char id>): compare
+  # those by service and slot.
+  local key='s/\.([0-9]+)\.[a-z0-9]{25}$/.\1/'
+  comm -23 <(sed -E "$key" "$1" | sort -u) <(sed -E "$key" "$2" | sort -u)
+}

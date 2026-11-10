@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# podroid-upgrade — upgrade Podroid on one phone to the pinned APK without killing its guest's
+# containers mid-write, then check that everything came back.
+#
+# Usage: bin/podroid-upgrade <adb-serial | host:port> [--backup-volumes DIR]
+#   --backup-volumes DIR  copy the guest's /var/lib/docker/volumes into DIR (owner-only .tar.gz)
+#                         while docker is stopped, before the VM stops
+#
+# Order: pause the watchdog, stop docker in the guest (containers stop cleanly; restart policies
+# still bring them back on boot because the daemon stopped them, not a user), stop the VM, install
+# the APK in place (keeps the VM disk), start the VM, then compare kernel, containers and Dokploy's
+# server.validate with before. Installing over a running VM would kill it, and Podroid's own stop
+# only flushes the disk before killing the VM.
+# Needs: pins/podroid.version and its APK (bin/apk-fetch), the operator ssh key in the guest
+# (bin/phone-provision), the dokploy CLI logged in.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# shellcheck disable=SC1091
+source bin/lib.sh
+
+TARGET=""; BACKUP_DIR=""; APK_DIR=${APK_DIR:-apks}
+STOP_TIMEOUT=${STOP_TIMEOUT:-120} BOOT_TIMEOUT=${BOOT_TIMEOUT:-600} CONTAINER_TIMEOUT=${CONTAINER_TIMEOUT:-300}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --backup-volumes) BACKUP_DIR=${2:?--backup-volumes needs a directory}; shift ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) TARGET=$1 ;;
+  esac
+  shift
+done
+[ -n "$TARGET" ] || die "usage: bin/podroid-upgrade <adb-serial | host:port> [--backup-volumes DIR]"
+[ -z "$BACKUP_DIR" ] || [ -d "$BACKUP_DIR" ] || die "backup directory $BACKUP_DIR does not exist"
+adb -s "$TARGET" get-state >/dev/null 2>&1 || die "adb cannot see $TARGET"
+
+PKG=$(awk '$1=="podroid"{print $2}' pins/packages)
+PIN=${PODROID_PIN:-$(cat pins/podroid.version)}
+SERIAL=$(adb_real_serial "$TARGET")
+NAME=$(awk -v s="$SERIAL" '$1==s {print $2}' pins/phones); [ -n "$NAME" ] || die "serial $SERIAL is not in pins/phones"
+PAUSE=/data/local/tmp/podroid-watchdog.pause
+RECEIVER=com.excp.podroid/.service.VmControlReceiver
+step() { echo "== $*"; log "$*"; }
+
+BEFORE=$(parse_version_name "$(adb -s "$TARGET" shell dumpsys package "$PKG")")
+if [ "$(version_matches_pin "$BEFORE" "$PIN")" = yes ]; then echo "$NAME already on Podroid $BEFORE"; exit 0; fi
+APK="$APK_DIR/Podroid-$PIN-release.apk"
+[ -f "$APK" ] || die "no $APK (run bin/apk-fetch)"
+
+vm_state() { adb -s "$TARGET" shell content call --uri content://com.excp.podroid.control --method state | sed -nE 's/.* vm=([a-z]+).*/\1/p'; }
+vm_intent() { adb -s "$TARGET" shell am broadcast -a "com.excp.podroid.action.$1" -n "$RECEIVER" >>"$LOG_FILE" 2>&1; }
+LOCAL_PORT=$(adb -s "$TARGET" forward tcp:0 tcp:9922)
+SSH_OPTS=(-p "$LOCAL_PORT" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+# shellcheck disable=SC2029  # guest commands are composed here on purpose
+gsh() { ssh "${SSH_OPTS[@]}" root@127.0.0.1 "$@" </dev/null; }
+PAUSED=0
+cleanup() {
+  [ "$PAUSED" = 1 ] && adb -s "$TARGET" shell rm -f "$PAUSE" >>"$LOG_FILE" 2>&1
+  adb -s "$TARGET" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+step "1 before ($NAME, Podroid $BEFORE -> ${PIN#v})"
+gsh true || die "cannot ssh into the guest through adb forward $LOCAL_PORT (operator key; see bin/phone-provision)"
+KERNEL_BEFORE=$(gsh "uname -r")
+NAMES_BEFORE=$(mktemp); NAMES_AFTER=$(mktemp); trap 'cleanup; rm -f "$NAMES_BEFORE" "$NAMES_AFTER"' EXIT
+gsh "docker ps --format '{{.Names}}'" > "$NAMES_BEFORE"
+echo "   kernel $KERNEL_BEFORE, $(wc -l < "$NAMES_BEFORE") containers running"
+
+step "2 stop docker, then the VM"
+adb -s "$TARGET" shell touch "$PAUSE" >>"$LOG_FILE" 2>&1; PAUSED=1
+gsh "rc-service docker stop" >>"$LOG_FILE" 2>&1 || die "rc-service docker stop failed in the guest"
+if [ -n "$BACKUP_DIR" ]; then
+  BACKUP="$BACKUP_DIR/$NAME-$(date +%Y%m%d-%H%M%S)-volumes.tar.gz"
+  if (umask 077; gsh "tar -C /var/lib/docker/volumes -czf - ." > "$BACKUP") && gzip -t "$BACKUP"; then
+    echo "   volumes saved to $BACKUP ($(du -h "$BACKUP" | cut -f1))"
+  else
+    gsh "rc-service docker start" >>"$LOG_FILE" 2>&1 || true
+    die "volume backup to $BACKUP failed; docker started again, nothing upgraded"
+  fi
+fi
+vm_intent STOP_VM
+STATE=""
+for _ in $(seq 0 5 "$STOP_TIMEOUT"); do STATE=$(vm_state); [ "$STATE" = stopped ] && break; sleep 5; done
+if [ "$STATE" != stopped ]; then
+  gsh "rc-service docker start" >>"$LOG_FILE" 2>&1 || true
+  die "the VM did not stop within ${STOP_TIMEOUT}s (state: ${STATE:-unknown}); docker started again, nothing installed"
+fi
+echo "   VM stopped"
+
+step "3 install $APK"
+if ! adb -s "$TARGET" install -r "$APK" >>"$LOG_FILE" 2>&1; then
+  vm_intent START_VM
+  die "adb install failed (see $LOG_FILE); the old VM is starting again"
+fi
+AFTER=$(parse_version_name "$(adb -s "$TARGET" shell dumpsys package "$PKG")")
+[ "$(version_matches_pin "$AFTER" "$PIN")" = yes ] || { vm_intent START_VM; die "installed version is $AFTER, expected ${PIN#v}"; }
+
+step "4 start the VM"
+vm_intent START_VM
+UP=no
+for _ in $(seq 0 5 "$BOOT_TIMEOUT"); do gsh true 2>/dev/null && { UP=yes; break; }; sleep 5; done
+[ "$UP" = yes ] || die "the guest did not answer ssh within ${BOOT_TIMEOUT}s of START_VM"
+KERNEL_AFTER=$(gsh "uname -r")
+
+step "5 check"
+MISSING=""
+for _ in $(seq 0 5 "$CONTAINER_TIMEOUT"); do
+  gsh "docker ps --format '{{.Names}}'" > "$NAMES_AFTER" 2>/dev/null || true
+  MISSING=$(containers_missing "$NAMES_BEFORE" "$NAMES_AFTER")
+  [ -z "$MISSING" ] && break; sleep 5
+done
+SERVERS=$(mktemp); dk_get server.all > "$SERVERS" || true
+SID=$(find_server_id "$SERVERS" "$NAME" 2>/dev/null || true); rm -f "$SERVERS"
+DOKPLOY=$([ -n "$SID" ] && dokploy_validate_state "$SID" || echo "no server named $NAME")
+TOTAL=$(wc -l < "$NAMES_BEFORE")
+echo "   Podroid $BEFORE -> $AFTER, kernel $KERNEL_BEFORE -> $KERNEL_AFTER"
+echo "   containers back: $((TOTAL - $(printf '%s' "$MISSING" | grep -c .)))/$TOTAL${MISSING:+, not back: $(echo "$MISSING" | paste -sd' ')}"
+echo "   dokploy: $DOKPLOY"
+[ -z "$MISSING" ] && [ "$DOKPLOY" = ready ]
