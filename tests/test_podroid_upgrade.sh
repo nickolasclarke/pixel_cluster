@@ -48,6 +48,8 @@ echo "curl ${*: -1}" >> "$S/calls"
 case "$*" in
   *server.all*) echo '[{"name":"pixel-7-podroid","serverId":"SID7"}]' ;;
   *server.validate*)
+    n=$(cat "$S/validate_calls" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$S/validate_calls"
+    if [ -e "$S/dokploy_late" ] && [ "$n" -le 2 ] || [ -e "$S/dokploy_never" ]; then printf 400; exit 0; fi
     out=""; prev=""; for a in "$@"; do [ "$prev" = -o ] && out=$a; prev=$a; done
     echo '{"isMainDirectoryInstalled":true,"traefik":{"version":"3.6.25","enabled":true}}' > "$out"; printf 200 ;;
   *) exit 1 ;;
@@ -56,7 +58,7 @@ STUB
   printf '#!/bin/sh\nexit 0\n' > "$S/bin/sleep"
   chmod +x "$S/bin/"*; : > "$S/calls"
   PU_OUT=$(PODROID_PIN=v1.3.0 APK_DIR="$S/apks" LOG_FILE="$S/log" DOKPLOY_TOKEN=t PATH="$S/bin:$PATH" \
-    STOP_TIMEOUT=3 BOOT_TIMEOUT=3 CONTAINER_TIMEOUT=3 timeout 20 bin/podroid-upgrade 10.9.8.7:5555 ${PU_BACKUP:+--backup-volumes "$S/backups"} 2>&1)
+    STOP_TIMEOUT=3 BOOT_TIMEOUT=3 CONTAINER_TIMEOUT=3 DOKPLOY_TIMEOUT=15 timeout 20 bin/podroid-upgrade 10.9.8.7:5555 ${PU_BACKUP:+--backup-volumes "$S/backups"} 2>&1)
   PU_RC=$?
   PU_CALLS=$(cat "$S/calls")
   PU_BACKUPS=$(cd "$S/backups" && for f in *; do [ -e "$f" ] && echo "$f $(stat -c %a "$f") $(gzip -dc "$f")"; done)
@@ -126,6 +128,15 @@ assert_eq "yes" "$(echo "$PU_CALLS" | tail -3 | grep -q 'rm -f /data/local/tmp/p
 pu_run container_lost
 assert_eq "yes" "$([ "$PU_RC" -ne 0 ] && echo "$PU_OUT" | grep -q 'not back: hermes-1' && echo yes)" \
   "upgrade fails and names a container that was running before and is not after"
+
+# The guest answers ssh over adb before its tailscaled has rejoined, so Dokploy's first validate can
+# fail (seen on the Pixel 7: error-400, ready a minute later).
+pu_run dokploy_late
+assert_eq "yes" "$([ "$PU_RC" -eq 0 ] && echo "$PU_OUT" | grep -q 'dokploy: ready' && echo yes)" \
+  "upgrade waits for Dokploy to reach the guest again"
+pu_run dokploy_never
+assert_eq "yes" "$([ "$PU_RC" -ne 0 ] && echo "$PU_OUT" | grep -q 'dokploy: error-400' && echo yes)" \
+  "upgrade fails and reports Dokploy's answer when it never reaches the guest"
 
 # containers_missing (lib.sh): compares container names before and after a VM restart. A swarm task's
 # container comes back with a new task id (<service>.<slot>.<25-char id>), so it is compared without it.

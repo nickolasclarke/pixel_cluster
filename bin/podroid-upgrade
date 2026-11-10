@@ -20,6 +20,7 @@ source bin/lib.sh
 
 TARGET=""; BACKUP_DIR=""; APK_DIR=${APK_DIR:-apks}
 STOP_TIMEOUT=${STOP_TIMEOUT:-120} BOOT_TIMEOUT=${BOOT_TIMEOUT:-600} CONTAINER_TIMEOUT=${CONTAINER_TIMEOUT:-300}
+DOKPLOY_TIMEOUT=${DOKPLOY_TIMEOUT:-300}
 while [ $# -gt 0 ]; do
   case "$1" in
     --backup-volumes) BACKUP_DIR=${2:?--backup-volumes needs a directory}; shift ;;
@@ -110,7 +111,11 @@ for _ in $(seq 0 5 "$CONTAINER_TIMEOUT"); do
 done
 SERVERS=$(mktemp); dk_get server.all > "$SERVERS" || true
 SID=$(find_server_id "$SERVERS" "$NAME" 2>/dev/null || true); rm -f "$SERVERS"
-DOKPLOY=$([ -n "$SID" ] && dokploy_validate_state "$SID" || echo "no server named $NAME")
+DOKPLOY="no server named $NAME"
+# the guest answers ssh over adb before its tailscaled rejoins, so Dokploy may not reach it at first
+if [ -n "$SID" ]; then
+  for _ in $(seq 0 5 "$DOKPLOY_TIMEOUT"); do DOKPLOY=$(dokploy_validate_state "$SID"); [ "$DOKPLOY" = ready ] && break; sleep 5; done
+fi
 TOTAL=$(wc -l < "$NAMES_BEFORE")
 echo "   Podroid $BEFORE -> $AFTER, kernel $KERNEL_BEFORE -> $KERNEL_AFTER"
 echo "   containers back: $((TOTAL - $(printf '%s' "$MISSING" | grep -c .)))/$TOTAL${MISSING:+, not back: $(echo "$MISSING" | paste -sd' ')}"
